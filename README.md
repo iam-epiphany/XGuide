@@ -2,8 +2,6 @@
 
 EchoGuide 是面向西安电子科技大学学生的校园 Agent，也是一个自己实现的轻量 **Agent Runtime / Harness**。项目围绕五个工程问题做了比较完整的实现：**分层长程记忆（Working Memory + L0-L3）、级联意图识别、Agentic RAG、Monitor/Trace 可观测、MCP Server**；其他能力（Task-scoped SubAgent、Fast/Deep 双路径、动态 Skills、工具权限、Verifier、DAG 编排、评测）都是支撑这五条主线的二级能力。
 
-课表、校车、办事清单和故障诊断走 **DeepSeek V4 Flash 快速路径**；政策检索、低置信度问题和跨领域依赖任务进入 **DeepSeek V4 Pro 深度路径**。
-
 ## 核心架构
 
 ```text
@@ -21,6 +19,9 @@ Agent Runtime / Harness
 ## 真实网页实测
 
 以下截图由 Playwright 访问真实网页、登录 Demo 用户、导入动态课表、调用真实 DeepSeek 模型后自动生成；使用 `?debug=1` 展开 Profile、分类阶段、工具、DAG、Token 和 Trace ID。
+### 架构图
+
+![架构图](assets/readme/overview.png)
 
 ### Fast · 个人课表
 
