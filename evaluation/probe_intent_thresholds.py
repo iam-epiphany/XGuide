@@ -23,15 +23,15 @@ pattern=OTHER 且追问形态 → 直接 LLM）。
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))  # 支持直接 python evaluation/probe_intent_thresholds.py 运行
 
 from core.domains import IntentDomain, domain_hit_score  # noqa: E402
-from core.intent_recognizer import IntentRecognizer, _DOMAIN_TEMPLATES, _cosine  # noqa: E402
+from core.intent_recognizer import _DOMAIN_TEMPLATES, IntentRecognizer, _cosine  # noqa: E402
 
 PATTERN_THRESHOLD = 0.90
 # 对比的两个候选配置（阈值, margin）；共享 margin 0.10，只对比阈值影响

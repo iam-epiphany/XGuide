@@ -13,11 +13,10 @@ import io
 import pytest
 
 from mcp.document_parser import (
+    _ANYDOC_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     parse_document,
-    _ANYDOC_EXTENSIONS,
 )
-
 
 # ── 测试内生成 PDF/DOCX 的辅助 ─────────────────────────────────────────────
 

@@ -14,6 +14,7 @@ EchoGuard 真实接入 —— FastAPI HTTP 中间件
 
 启用：ECHOGUIDE_GUARD_ENABLED 默认 1（注入检测/限流/审计开箱即用）。
 """
+from collections import defaultdict, deque
 import hashlib
 import hmac
 import json
@@ -21,7 +22,6 @@ import logging
 import os
 import re
 import time
-from collections import defaultdict, deque
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from prometheus_client import Counter

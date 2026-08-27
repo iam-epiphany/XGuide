@@ -18,8 +18,11 @@ node_modules/
 # 根目录临时运行、评测、审阅与参考材料（仅本地保留）
 /.tmp-*
 
-# 本地生成文档与历史归档（README 资产统一放 assets/readme/）
-/docs/
+# 本地生成文档与历史归档（README 资产统一放 assets/readme/）；正式文档入库
+/docs/*
+!/docs/architecture.md
+!/docs/api.md
+!/docs/database-er.md
 # 文档生成脚本（个人用，仅本地使用，不入库）
 /_docs_gen/
 # 学习文档（个人学习资料，仅本地使用，不入库）
@@ -60,3 +63,11 @@ docker-compose(1).yml
 
 # 评测脚本生成物（compare_embedders.py 输出，可随时重新生成）
 evaluation/embedding_compare_result.json
+
+# 常见临时文件
+*.log
+*.tmp
+*.temp
+*.cache
+.cache/
+*.pid

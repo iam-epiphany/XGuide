@@ -11,8 +11,9 @@
 """
 from __future__ import annotations
 
+from datetime import date, datetime
+from datetime import time as dtime
 import os
-from datetime import date, datetime, time as dtime, timedelta
 from typing import List, Optional, Tuple
 
 # ── 学期配置（环境变量可覆盖）───────────────────────────────────────────────

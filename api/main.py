@@ -13,18 +13,18 @@ mcp（MCP 协议）、system（健康/Skills/校园公开信息）。
 全局组件与运行时构建统一在 api/state.py，避免多处初始化漂移。
 """
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 import os
 import pathlib
 import sys
 import uuid
-from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -138,12 +138,12 @@ for _router in (
 
 
 # ── 轻量登录认证 ──────────────────────────────────────────────────────────────
+from api.deps import optional_user, require_user  # noqa: E402
 from auth.service import (  # noqa: E402
     SESSION_COOKIE,
     create_session_token,
     get_auth_store,
 )
-from api.deps import optional_user, require_user  # noqa: E402
 
 
 class AuthCredentials(BaseModel):

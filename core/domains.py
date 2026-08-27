@@ -14,8 +14,8 @@ EchoGuide 领域词表 —— 全系统唯一的领域定义与关键词来源�
 """
 from __future__ import annotations
 
-import re
 from enum import Enum
+import re
 from typing import Dict, List
 
 

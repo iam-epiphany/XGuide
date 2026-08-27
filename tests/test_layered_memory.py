@@ -11,14 +11,15 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
-
 from memory.conversation_memory import (
-    MemoryContext, MemoryManager, Message, MsgRole,
-    _fact_relevant_to_query, _fact_subsumed_by_profile,
+    MemoryContext,
+    MemoryManager,
+    Message,
+    MsgRole,
+    _fact_relevant_to_query,
+    _fact_subsumed_by_profile,
 )
 from memory.layered_store import LayeredStore, estimate_tokens
-
 
 # ── 纯逻辑：token 估算 ───────────────────────────────────────────────────────
 

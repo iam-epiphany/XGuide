@@ -107,7 +107,6 @@ async def analyze_sentence(sentence: str, evidences: list[dict]) -> dict:
 
 async def run_trace(cases, smoke: bool) -> list[dict]:
     from agents.agent_orchestrator import Request as OrcReq
-
     from api import state
 
     state._build_runtime()

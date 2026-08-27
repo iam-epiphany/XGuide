@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 MIN_DICE = 0.16
 MIN_COS = 0.52

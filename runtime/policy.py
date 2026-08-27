@@ -9,8 +9,8 @@ frozen：运行期不可变，换策略即换实例。
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
+import os
 
 
 def _int_env(name: str, default: int) -> int:

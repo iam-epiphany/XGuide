@@ -2,20 +2,19 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, timedelta
 import functools
 import json
 import math
 import os
+from pathlib import Path
 import re
 import statistics
 import subprocess
 import time
-from datetime import date, timedelta
-from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import httpx
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES_PATH = ROOT / "evaluation" / "demo_cases.json"

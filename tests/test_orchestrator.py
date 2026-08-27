@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 
-from core.domains import IntentAction, IntentDomain
 from agents.agent_orchestrator import (
     AgentOrchestrator,
     AgentResponse,
@@ -15,7 +14,8 @@ from agents.agent_orchestrator import (
 from agents.persona import ACTION_GUIDANCE, DOMAIN_PERSONA, action_allows_tool
 from agents.profiles import ProfileName
 from agents.roles import AgentStats, BaseAgent, TaskAgent, WritePolicy, write_policy_for
-from agents.workflow import ExecutionPlan, SharedState, Task, TaskPlanner
+from agents.workflow import ExecutionPlan, SharedState, Task
+from core.domains import IntentAction, IntentDomain
 
 FAKE_KEY = "sk-test-not-used"
 
@@ -751,8 +751,8 @@ def test_execute_tool_respects_instance_allowlist_override():
 
 def _fake_skill_manager():
     """临时目录 SkillManager：academic / campus_life 两个 Skill，构造即加载。"""
-    import tempfile
     from pathlib import Path
+    import tempfile
 
     from core.skill_loader import SkillManager
 

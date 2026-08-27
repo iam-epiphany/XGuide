@@ -26,12 +26,12 @@
 """
 import logging
 import os
+from pathlib import Path
 import re
 import threading
 import time
-import urllib.request
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import urllib.request
 
 import numpy as np
 

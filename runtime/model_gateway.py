@@ -35,10 +35,10 @@ token 逐次累加；一次模型调用 = 一次 before/after_model。
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import time
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from runtime.context import RunContext
 from runtime.middleware import BudgetExceeded, GuardRejection, MiddlewareChain

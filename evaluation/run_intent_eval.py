@@ -35,7 +35,7 @@ load_dotenv()  # 加载 .env（ANTHROPIC_API_KEY 等）
 
 from core.intent_recognizer import IntentDomain, IntentRecognizer
 from evaluation.cases import load_intent_cases
-from evaluation.evaluator import IntentEvaluator, IntentTestCase
+from evaluation.evaluator import IntentEvaluator
 
 
 def _llm_config() -> dict:

@@ -22,16 +22,14 @@ import numpy as np
 
 from mcp import embeddings
 from mcp.embeddings import (
+    QUERY_INSTRUCTION,
     LocalEmbedder,
     LocalReranker,
-    QUERY_INSTRUCTION,
     _ensure_model,
     _get_singleton,
     get_embedder,
-    get_reranker,
     reset_singletons,
 )
-
 
 # ── 最小替身（结构对齐 tokenizers / onnxruntime）─────────────────────────────
 

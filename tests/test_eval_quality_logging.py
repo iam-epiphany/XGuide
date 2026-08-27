@@ -6,8 +6,8 @@
 """
 import asyncio
 import logging
-import sys
 from pathlib import Path
+import sys
 from unittest.mock import AsyncMock, MagicMock
 
 _ROOT = str(Path(__file__).parent.parent.resolve())

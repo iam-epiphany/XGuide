@@ -13,6 +13,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      # 代码质量检查（ruff）
+      - run: ruff check . --output-format=github
+      # 单元测试
       - run: python -m pytest tests -q
       - uses: actions/setup-node@v4
         with:

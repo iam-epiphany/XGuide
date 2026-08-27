@@ -14,15 +14,14 @@
   - IntentRecognizer.recognize：intent_recognize span
   - KnowledgeBase.search：kb_search span
 """
-import asyncio
+from collections import OrderedDict
+from contextlib import asynccontextmanager, contextmanager
 import contextvars
 import json
 import logging
 import time
-import uuid
-from collections import OrderedDict
-from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Dict, List, Optional
+import uuid
 
 logger = logging.getLogger(__name__)
 

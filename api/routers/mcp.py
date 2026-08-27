@@ -21,7 +21,7 @@ async def mcp_endpoint(request: Request):
     """
     if state._tool_manager is None:
         raise HTTPException(503, "工具管理器未初始化")
-    from mcp.protocol import MCPServer, SUPPORTED_PROTOCOL_VERSIONS
+    from mcp.protocol import SUPPORTED_PROTOCOL_VERSIONS, MCPServer
 
     state._validate_mcp_origin(request)
     state._validate_mcp_accept(request)

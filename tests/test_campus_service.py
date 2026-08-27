@@ -4,8 +4,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 import json
-from datetime import date, datetime
 
 from campus.store import CampusInfoStore
 

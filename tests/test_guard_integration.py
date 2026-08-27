@@ -1,8 +1,6 @@
 """EchoGuard 中间件真实接入测试：认证 / 注入检测 / 输入约束 / 限流 / 放行。"""
 from __future__ import annotations
 
-import json
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -116,8 +114,8 @@ def test_replay_body_preserves_request():
         return {"got": body.get("message")}
 
     # 手动构造带中间件的 capture 路由
-    from starlette.middleware import Middleware
     from starlette.applications import Starlette
+    from starlette.middleware import Middleware
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 
@@ -137,8 +135,8 @@ def test_replay_body_preserves_request():
 
 def test_middleware_internal_error_fails_closed_on_protected_path():
     """受保护路径的 Guard 故障必须失败关闭，不能绕过安全边界。"""
-    from starlette.middleware import Middleware
     from starlette.applications import Starlette
+    from starlette.middleware import Middleware
     from starlette.responses import JSONResponse
     from starlette.routing import Route
 

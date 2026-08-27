@@ -25,20 +25,20 @@ Working Memory 承载当前会话近期上下文，不计入 L0-L3：
   - Embedding 由本地 bge 中文模型生成（mcp.embeddings，ONNX，不依赖外部 API）；
     模型不可用时回退 ChromaDB 内置 all-MiniLM-L6-v2（collection 名随向量空间切换）
 """
-import hashlib
 import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+import hashlib
 import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from anthropic import AsyncAnthropic
 import chromadb
 import redis.asyncio as redis
-from anthropic import AsyncAnthropic
 
 from mcp.embeddings import get_embedder
 from memory.layered_store import LayeredStore

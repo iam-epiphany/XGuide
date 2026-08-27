@@ -44,19 +44,23 @@ SharedState 只保存 Task result/status/meta 与必要的依赖快照；后续 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from anthropic import AsyncAnthropic
 
-from core.domains import (
-    ACTION_KEYWORDS, DOMAIN_KEYWORDS, IntentAction, IntentDomain, keyword_hit,
-)
 from agents.roles import AgentResponse
+from core.domains import (
+    ACTION_KEYWORDS,
+    DOMAIN_KEYWORDS,
+    IntentAction,
+    IntentDomain,
+    keyword_hit,
+)
 
 if TYPE_CHECKING:
     from agents.agent_orchestrator import Request

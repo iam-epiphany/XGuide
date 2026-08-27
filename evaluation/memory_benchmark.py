@@ -27,10 +27,13 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from memory.layered_store import (
-    LayeredStore, estimate_tokens, OFFLOAD_CHARS, OFFLOAD_SUMMARY_CHARS,
-)
 from memory.conversation_memory import Message, MsgRole, _has_profile_signal
+from memory.layered_store import (
+    OFFLOAD_CHARS,
+    OFFLOAD_SUMMARY_CHARS,
+    LayeredStore,
+    estimate_tokens,
+)
 
 # ── 模拟数据（固定内容，确定性）───────────────────────────────────────────────
 

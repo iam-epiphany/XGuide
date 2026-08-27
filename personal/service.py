@@ -12,12 +12,12 @@
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 import re
-from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from personal.store import PersonalStore
-from personal.time_context import SEMESTER_START, SEMESTER_WEEKS, WEEKDAY_CN
+from personal.time_context import SEMESTER_START, WEEKDAY_CN
 
 _WEEKDAY_NUM = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 

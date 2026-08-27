@@ -12,7 +12,10 @@ Runtime 保证。HTTP 层（Guard ASGI、语义缓存、记忆读写）不迁移
 """
 from runtime.context import RunContext
 from runtime.middleware import (
-    BudgetExceeded, GuardRejection, MiddlewareChain, RuntimeMiddleware,
+    BudgetExceeded,
+    GuardRejection,
+    MiddlewareChain,
+    RuntimeMiddleware,
 )
 from runtime.policy import ExecutionPolicy
 from runtime.runtime import AgentRuntime, default_middlewares

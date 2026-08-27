@@ -9,7 +9,7 @@ from datetime import date
 
 import pytest
 
-from personal.ics_parser import Course, parse_ics
+from personal.ics_parser import parse_ics
 from personal.service import (
     PersonalService,
     compress_weeks,

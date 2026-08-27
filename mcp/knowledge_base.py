@@ -39,8 +39,8 @@ import hashlib
 import json
 import logging
 import os
-import re
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb

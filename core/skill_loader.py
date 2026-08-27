@@ -11,10 +11,10 @@ Skill 是一段可热加载的业务能力说明，用来补充 Agent 的 system
   2. 追问感知：当前消息未命中时，会继续匹配最近 2 轮用户消息，
      保证"南校区食堂几点关门？→ 那几点开门呢？"这类追问仍能注入对应 SOP。
 """
-import logging
-import re
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
+import re
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.domains import keyword_hit

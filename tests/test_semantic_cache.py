@@ -27,7 +27,6 @@ from mcp.semantic_cache import (
     classify_context_dependence,
 )
 
-
 # ── 上下文依赖性判定 ────────────────────────────────────────────────────────
 
 def test_classify_short_followup_with_deictic_skips():
@@ -334,9 +333,10 @@ class _FakeOrchestrator:
 
 def _run_chat(user_id, context_text="", message="南校区食堂几点关门？", request=None):
     """打桩跑一遍 /chat 非流式主链路，返回缓存调用记录。"""
+    from fastapi import Response
+
     import api.main as m
     import api.state as state
-    from fastapi import Response
 
     state._orchestrator = _FakeOrchestrator()
     state._memory = _FakeMemory(context_text)

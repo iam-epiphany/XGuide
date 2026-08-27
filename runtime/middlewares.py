@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from runtime.context import RunContext
 from runtime.middleware import BudgetExceeded, GuardRejection, RuntimeMiddleware

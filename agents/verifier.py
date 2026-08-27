@@ -19,10 +19,10 @@ LLM 判定（可选，策略开关，仅 DEEP/执行路径）：一次廉价判�
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 import logging
 import re
-from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional
 
 from core.domains import IntentAction

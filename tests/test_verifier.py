@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from agents.agent_orchestrator import (
-    AgentOrchestrator, AgentResponse, Request,
+    AgentOrchestrator,
+    AgentResponse,
+    Request,
 )
 from agents.verifier import ResponseVerifier
 from core.domains import IntentAction, IntentDomain

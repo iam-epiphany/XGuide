@@ -29,23 +29,25 @@ Skill 渐进披露都在 BaseAgent/TaskAgent 中实现，是五条主线中 Agen
 """
 from __future__ import annotations
 
-import asyncio
+from collections import deque
+from dataclasses import dataclass, field
+from enum import Enum
 import inspect
 import json
 import logging
 import time
-from collections import deque
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from anthropic import AsyncAnthropic
 
-from core.domains import IntentAction, IntentDomain
 from agents.persona import ACTION_GUIDANCE, DOMAIN_PERSONA, action_allows_tool
 from agents.profiles import ExecutionProfile, ProfileName
+from core.domains import IntentAction, IntentDomain
 from memory.layered_store import (
-    LayeredStore, OFFLOAD_CHARS, OFFLOAD_SUMMARY_CHARS, estimate_tokens,
+    OFFLOAD_CHARS,
+    OFFLOAD_SUMMARY_CHARS,
+    LayeredStore,
+    estimate_tokens,
 )
 
 logger = logging.getLogger(__name__)

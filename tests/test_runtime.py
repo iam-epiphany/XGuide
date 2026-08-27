@@ -5,21 +5,31 @@ AgentRuntime / 四个具体中间件 / 编排器集成。全部不触发真实 L
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import pytest
 
 from agents.agent_orchestrator import (
-    AgentOrchestrator, Request, Task, TaskExecutor,
+    AgentOrchestrator,
+    Request,
+    Task,
+    TaskExecutor,
 )
 from agents.profiles import ProfileName
 from core.domains import IntentAction, IntentDomain
 from runtime import (
-    AgentRuntime, ExecutionPolicy, GuardRejection, MiddlewareChain, RunContext,
-    RunState, RuntimeMiddleware,
+    AgentRuntime,
+    ExecutionPolicy,
+    GuardRejection,
+    MiddlewareChain,
+    RunContext,
+    RunState,
+    RuntimeMiddleware,
 )
 from runtime.middlewares import (
-    BudgetMiddleware, GuardMiddleware, SkillMiddleware, TraceMiddleware,
+    BudgetMiddleware,
+    GuardMiddleware,
+    TraceMiddleware,
 )
 
 FAKE_KEY = "sk-test-not-used"

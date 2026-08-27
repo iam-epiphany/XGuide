@@ -1,8 +1,8 @@
 """Skill catalog、统一只读加载与资源路径保护测试。"""
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 from core.skill_loader import SkillManager
 from core.tracing import begin_trace, end_trace

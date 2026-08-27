@@ -131,13 +131,13 @@ def _build_runtime() -> None:
 
     from agents.agent_orchestrator import AgentOrchestrator
     from campus.store import CampusInfoStore
+    from core.skill_loader import SkillManager
     from evaluation.evaluator import EndToEndEvaluator
     from mcp.knowledge_base import KnowledgeBase
     from mcp.semantic_cache import SemanticCache
     from mcp.tool_manager import MCPToolManager, Tool, ToolEffect
     from memory.conversation_memory import MemoryManager
     from monitor.performance_monitor import PerformanceMonitor
-    from core.skill_loader import SkillManager
     from personal.service import PersonalService
     from personal.store import PersonalStore
     from runtime.policy import ExecutionPolicy
@@ -147,8 +147,8 @@ def _build_runtime() -> None:
     from tools.affairs_tool import query_affairs_process_handler
     from tools.campus_tool import campus_info_handler
     from tools.ddl_tool import query_ddl_handler
-    from tools.schedule_tool import query_schedule_handler
     from tools.it_tool import diagnose_it_issue_handler
+    from tools.schedule_tool import query_schedule_handler
     from tools.todo_tool import add_todo_handler, complete_todo_handler, query_todo_handler
     from tools.weather import weather_handler
 

@@ -1,8 +1,8 @@
 """Lightweight authentication and authorization tests."""
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
+import pytest
 
 import auth.service as auth_service
 from auth.service import AuthStore, create_session_token, decode_session_token

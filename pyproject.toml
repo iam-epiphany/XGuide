@@ -1,0 +1,131 @@
+[project]
+name = "echoguide"
+version = "0.1.0"
+description = "西电校园智慧助手 - Agent Runtime / Harness"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.109.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "python-multipart>=0.0.10",
+    "redis>=5.2.0",
+    "chromadb>=0.5.20",
+    "tokenizers>=0.20.0",
+    "onnxruntime>=1.28.0",
+    "numpy>=2.0.0",
+    "firecrawl-anydoc>=0.1.0",
+    "prometheus-client>=0.21.0",
+    "httpx>=0.28.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "httpx>=0.28.0",
+    "PyJWT>=2.8.0",
+    "PyYAML>=6.0.0",
+    "pypdf>=6.11.0",
+    "reportlab>=5.0.0",
+    "python-docx>=1.2.0",
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+# Python 版本目标
+target-version = "py312"
+
+# 代码行长度限制
+line-length = 120
+
+# 排除目录
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "*.egg-info",
+    "build",
+    "dist",
+    "node_modules",
+    ".pytest_cache",
+    "migrations",
+]
+
+[tool.ruff.lint]
+# 启用的规则集
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez
+    "T10",    # flake8-debugger
+    "ISC",    # flake8-implicit-str-concat
+    "ICN",    # flake8-import-conventions
+    "G",      # flake8-logging-format
+    "PIE",    # flake8-pie
+    "T20",    # flake8-print
+    "PT",     # flake8-pytest-style
+    "RUF",    # Ruff-specific rules
+]
+
+# 忽略的规则
+ignore = [
+    "E501",   # 行长度由 line-length 控制
+    "B008",   # 不在函数调用中执行函数调用
+    "T201",   # print 使用在测试和调试中允许
+    "PT011",  # pytest.raises 过于严格
+    "RUF002", # 允许全角标点（中文文档字符串正常需求）
+    "RUF003", # 允许注释中的全角标点（中文注释正常需求）
+    "RUF001", # 允许字符串中的全角标点（中文字符串正常需求）
+    "UP006",  # 暂不强制类型注解现代化（避免大规模改动）
+    "UP007",  # 暂不强制类型注解现代化
+    "UP035",  # 暂不强制 typing 模块现代化
+    "G004",   # 允许 logging 使用 f-string（常见用法）
+    "W505",   # 文档行长度限制
+    "RUF012", # 可变类属性注解（避免大规模改动）
+]
+
+# 允许自动修复的规则
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+# 测试文件中允许更宽松的规则
+"tests/**" = [
+    "S101",   # assert 使用
+    "ARG",    # 未使用的参数
+    "PLR2004", # 魔法值
+]
+
+# 评测脚本允许 print
+"evaluation/**" = [
+    "T201",   # print 使用
+]
+
+[tool.ruff.lint.isort]
+# 导入排序配置
+known-first-party = ["api", "agents", "core", "memory", "mcp", "tools", "auth", "personal", "campus", "monitor", "runtime"]
+force-sort-within-sections = true
+
+[tool.ruff.lint.flake8-annotations]
+# 类型注解配置
+suppress-dummy-args = true
+suppress-none-returning = true
+
+[tool.ruff.format]
+# 格式化配置
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.pycodestyle]
+# docstring 相关
+max-doc-length = 100
