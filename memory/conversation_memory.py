@@ -232,7 +232,7 @@ class MemoryManager:
         self.llm_call_count = 0
 
         # 增量提炼并发锁（每 user:conv 一把，防连续对话时后台任务重叠提炼同一区间）
-        self._extract_locks: Dict[str, "asyncio.Lock"] = {}
+        self._extract_locks: Dict[str, asyncio.Lock] = {}
 
         self._redis = redis.from_url(redis_url, decode_responses=True)
         # ChromaDB：优先连接独立服务（docker compose 模式），连不上则降级为本地嵌入式
@@ -471,7 +471,7 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
                 ids=[doc_id],
                 documents=[doc_text],
                 metadatas=[{"user_id": user_id, "conv_id": conv_id,
-                            "ts": datetime.now().isoformat()}],
+                            "ts": datetime.now().astimezone().isoformat()}],
             )
             await self._layered.save_profile_version(
                 user_id, doc_text, reason=f"signal: {conv_id}"
@@ -688,7 +688,7 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
             docs = results["documents"][0] if results["documents"] else []
             metas = results["metadatas"][0] if results.get("metadatas") else []
             kept = []
-            for d, mt in zip(docs, metas):
+            for d, mt in zip(docs, metas, strict=False):
                 if not isinstance(d, str) or not d.strip():
                     continue
                 # 普通片段查询时排除场景块（旧数据无 layer 字段视为普通）
@@ -724,7 +724,7 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
                 ids=[doc_id],
                 documents=[summary],
                 metadatas=[{"user_id": user_id, "conv_id": conv_id,
-                            "ts": datetime.now().isoformat(), "layer": layer}],
+                            "ts": datetime.now().astimezone().isoformat(), "layer": layer}],
             )
         except Exception as ex:
             logger.warning(f"存储情景记忆失败: {ex}")

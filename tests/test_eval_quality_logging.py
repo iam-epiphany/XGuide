@@ -14,7 +14,7 @@ _ROOT = str(Path(__file__).parent.parent.resolve())
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from evaluation.evaluator import EndToEndEvaluator, LLMJudge, QualityScores
+from evaluation.evaluator import EndToEndEvaluator, LLMJudge, QualityScores  # noqa: E402
 
 _LOG_LOGGER = "evaluation.evaluator"
 
@@ -61,7 +61,8 @@ def test_low_quality_logs_question_scores_and_response(caplog):
     assert "[Eval] 质量不达标" in text
     assert "question='南校区食堂几点关门？'" in text
     assert "overall=0.350" in text
-    assert "低分指标=" in text and "0.2" in text          # accuracy=0.2 在低分集合中
+    assert "低分指标=" in text
+    assert "0.2" in text
     assert "agent_type=campus_life" in text
     assert "judge_model=judge-test" in text
     assert "response=" in text                            # Agent 回答已落日志
@@ -94,7 +95,8 @@ def test_extension_metric_low_score_logged_even_if_main_passes(caplog):
     assert results[0].passed is True
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "[Eval] 质量不达标" in text
-    assert "faithfulness" in text and "0.4" in text
+    assert "faithfulness" in text
+    assert "0.4" in text
 
 
 def test_judge_retry_log_includes_question(caplog):

@@ -391,10 +391,5 @@ def test_task_executor_respects_max_tasks_cap():
         for i in range(3)
     ]
 
-    try:
+    with pytest.raises(ValueError, match="上限 2"):
         asyncio.run(executor.execute(req, tasks, max_tasks=2))
-        raised = False
-    except ValueError as ex:
-        raised = True
-        assert "上限 2" in str(ex)
-    assert raised

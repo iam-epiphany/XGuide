@@ -45,7 +45,7 @@ class ExecutionPolicy:
     verifier_llm_enabled: bool = False   # 出口校验 LLM 判定（规则校验始终开启；仅 DEEP/执行路径）
 
     @classmethod
-    def from_env(cls) -> "ExecutionPolicy":
+    def from_env(cls) -> ExecutionPolicy:
         """从 ECHOGUIDE_RUNTIME_* 环境变量构建（缺省回落默认值）。"""
         return cls(
             max_agents=_int_env("ECHOGUIDE_RUNTIME_MAX_AGENTS", 3),

@@ -304,7 +304,7 @@ class EchoGuardMiddleware:
             elif isinstance(node, dict):
                 for value in node.values():
                     walk(value, depth + 1)
-            elif isinstance(node, (list, tuple)):
+            elif isinstance(node, list | tuple):
                 for item in node:
                     walk(item, depth + 1)
 

@@ -175,7 +175,7 @@ class LayeredStore:
         content: str,
         meta: Dict[str, Any],
     ) -> int:
-        now = datetime.now().isoformat()
+        now = datetime.now().astimezone().isoformat()
         with self._connect() as conn:
             cur = conn.execute(
                 """SELECT COALESCE(MAX(turn_id), 0) + 1
@@ -269,7 +269,7 @@ class LayeredStore:
                    VALUES (?, ?, ?, ?)
                    ON CONFLICT(user_id, conv_id) DO UPDATE SET
                        last_turn = excluded.last_turn, ts = excluded.ts""",
-                (user_id, conv_id, turn, datetime.now().isoformat()),
+                (user_id, conv_id, turn, datetime.now().astimezone().isoformat()),
             )
 
     async def count_raw(self, user_id: Optional[str] = None) -> int:
@@ -300,7 +300,7 @@ class LayeredStore:
     def _add_facts_sync(self, user_id: str, facts: List[Dict[str, Any]]) -> int:
         if not facts:
             return 0
-        now = datetime.now().isoformat()
+        now = datetime.now().astimezone().isoformat()
         with self._connect() as conn:
             existing = {
                 r["fact"] for r in conn.execute(
@@ -396,7 +396,7 @@ class LayeredStore:
             cur = conn.execute(
                 """INSERT INTO profile_history (user_id, profile_json, reason, ts)
                    VALUES (?, ?, ?, ?)""",
-                (user_id, profile_json, reason, datetime.now().isoformat()),
+                (user_id, profile_json, reason, datetime.now().astimezone().isoformat()),
             )
             return cur.lastrowid
 
@@ -467,7 +467,7 @@ class LayeredStore:
                 """INSERT INTO refs (user_id, conv_id, tool, content, char_len, ts)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (user_id, conv_id, tool, content, len(content),
-                 datetime.now().isoformat()),
+                 datetime.now().astimezone().isoformat()),
             )
             return cur.lastrowid
 
@@ -530,9 +530,9 @@ class LayeredStore:
         max_profile_versions: int,
     ) -> Dict[str, int]:
         stats = {"raw": 0, "refs": 0, "facts": 0, "profiles": 0}
-        raw_cut = (datetime.now() - timedelta(days=raw_ttl_days)).isoformat()
-        ref_cut = (datetime.now() - timedelta(days=ref_ttl_days)).isoformat()
-        fact_cut = (datetime.now() - timedelta(days=fact_ttl_days)).isoformat()
+        raw_cut = (datetime.now().astimezone() - timedelta(days=raw_ttl_days)).isoformat()
+        ref_cut = (datetime.now().astimezone() - timedelta(days=ref_ttl_days)).isoformat()
+        fact_cut = (datetime.now().astimezone() - timedelta(days=fact_ttl_days)).isoformat()
         with self._connect() as conn:
             base = "WHERE user_id = ?" if user_id else ""
 
@@ -559,7 +559,7 @@ class LayeredStore:
 
             # profile_history：每人保留最近 max_profile_versions 版
             rows = conn.execute(
-                "SELECT user_id FROM profile_history" + (f" WHERE user_id = ?" if user_id else "")
+                "SELECT user_id FROM profile_history" + (" WHERE user_id = ?" if user_id else "")
                 + " GROUP BY user_id",
                 ([user_id] if user_id else []),
             ).fetchall()

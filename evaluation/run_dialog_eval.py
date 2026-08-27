@@ -27,7 +27,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 load_dotenv()  # 加载 .env
 
-from evaluation.cases import load_dialog_cases
+from evaluation.cases import load_dialog_cases  # noqa: E402
 
 
 async def main() -> int:

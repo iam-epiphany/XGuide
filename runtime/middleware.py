@@ -17,7 +17,7 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 
-class GuardRejection(Exception):
+class GuardRejection(Exception):  # noqa: N818 — 对外导出 API 命名
     """Guard 拦截（输入违规）：业务不执行，返回拒绝结果。"""
 
     def __init__(self, reason: str):
@@ -25,7 +25,7 @@ class GuardRejection(Exception):
         self.reason = reason
 
 
-class BudgetExceeded(Exception):
+class BudgetExceeded(Exception):  # noqa: N818 — 对外导出 API 命名
     """执行预算超限：强制中止当前步骤。"""
 
     def __init__(self, reason: str):
@@ -75,7 +75,7 @@ class MiddlewareChain:
     def items(self) -> List[RuntimeMiddleware]:
         return list(self._items)
 
-    def add(self, middleware: RuntimeMiddleware) -> "MiddlewareChain":
+    def add(self, middleware: RuntimeMiddleware) -> MiddlewareChain:
         self._items.append(middleware)
         return self
 

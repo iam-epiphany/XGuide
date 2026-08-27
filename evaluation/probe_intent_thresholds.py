@@ -122,7 +122,7 @@ def main() -> int:
     i = 0
     for domain in _DOMAIN_TEMPLATES:
         n = len(_DOMAIN_TEMPLATES[domain])
-        tpl_index[domain] = list(zip(_DOMAIN_TEMPLATES[domain], tpl_vecs[i:i + n]))
+        tpl_index[domain] = list(zip(_DOMAIN_TEMPLATES[domain], tpl_vecs[i:i + n], strict=False))
         i += n
 
     rows = []  # (msg, expect, note, routes, emb_domain, pat_display)
@@ -174,7 +174,7 @@ def main() -> int:
                   if not r[3]["0.85"].startswith("llm✂")
                   and r[3]["0.80"].startswith("embedding")
                   and r[3]["0.85"].startswith("llm")]
-    print(f"\n0.80 命中但 0.85 落入 LLM 的问题（\"牺牲品\"，看是否值得为它们降阈值）:")
+    print("\n0.80 命中但 0.85 落入 LLM 的问题（\"牺牲品\"，看是否值得为它们降阈值）:")
     for m in sacrificed:
         print(f"  - {m}")
     print("\n判断口径：牺牲品若多为高价值高频问句 → 选 0.80；若多为模糊/边缘句 →")

@@ -86,7 +86,7 @@ async def upload_knowledge(file: UploadFile = File(...), _admin=Depends(require_
     try:
         docs = parse_document(file.filename or "unknown", content)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     count = await asyncio.to_thread(kb.add_documents, docs)
     return {

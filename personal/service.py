@@ -12,7 +12,7 @@
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import re
 from typing import Any, Dict, List, Optional
 
@@ -78,7 +78,7 @@ def parse_date_expr(expr: Optional[str], today: Optional[date] = None) -> date:
       "YYYY-MM-DD"、"X月X日"（本年）、"这周/本周"（本周一）、"下周"（下周一）
     无法解析时抛 DateExprError。
     """
-    today = today or date.today()
+    today = today or datetime.now().astimezone().date()
     expr = (expr or "今天").strip()
     if expr in ("今天", "今日"):
         return today
@@ -179,7 +179,7 @@ class PersonalService:
         today: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         """地点反查："下午 3 点在 B 栋 508 上的是什么课"。"""
-        target = today or date.today()
+        target = today or datetime.now().astimezone().date()
         week = (target - SEMESTER_START).days // 7 + 1
         rows = await self.store.get_schedule(user_id)
         result = []
@@ -198,7 +198,7 @@ class PersonalService:
 
     async def weekly_overview(self, user_id: str, today: Optional[date] = None) -> Dict[str, Any]:
         """本周课程总览（周一~周日），供前端课表面板展示。"""
-        today = today or date.today()
+        today = today or datetime.now().astimezone().date()
         monday = today - timedelta(days=today.weekday())
         week = (monday - SEMESTER_START).days // 7 + 1
         in_semester = week >= 1
@@ -253,7 +253,7 @@ class PersonalService:
         未来 horizon_days 内的 DDL/考试（含已过期未完成的），带倒计时。
         按截止时间排序；到期/过期项置顶。days_left 负数表示已过期。
         """
-        today = today or date.today()
+        today = today or datetime.now().astimezone().date()
         deadline = today + timedelta(days=horizon_days)
         rows = await self.store.list_todos(
             user_id, status="open", kinds=["ddl", "exam"], due_before=deadline,
@@ -280,7 +280,7 @@ class PersonalService:
         当日汇总（对话"我今天的安排"与前端共用）：
         课程 + 未完成待办 + 未来 7 天 DDL/考试倒计时。
         """
-        today = today or date.today()
+        today = today or datetime.now().astimezone().date()
         schedule = await self.courses_on(user_id, "今天", today)
         todos = await self.list_todos(user_id, status="open", kinds=["todo"])
         ddls = await self.upcoming(user_id, horizon_days=7, today=today)
@@ -301,7 +301,7 @@ class PersonalService:
         对话式提醒汇总："我今天/最近有什么安排"。
         包含：今天剩余课程、明天课程、未来 7 天 DDL/考试（含今天到期与已过期）。
         """
-        today = today or date.today()
+        today = today or datetime.now().astimezone().date()
         today_sched = await self.courses_on(user_id, "今天", today)
         tomorrow_sched = await self.courses_on(user_id, "明天", today)
         ddls = await self.upcoming(user_id, horizon_days=7, today=today)

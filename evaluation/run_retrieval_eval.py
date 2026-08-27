@@ -28,10 +28,10 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 load_dotenv()  # 加载 .env（ANTHROPIC_API_KEY 等）
 
-from evaluation.cases import load_retrieval_cases
-from evaluation.evaluator import compute_retrieval_metrics
-from mcp.knowledge_base import KnowledgeBase
-from mcp.tool_manager import MCPToolManager, Tool, ToolEffect
+from evaluation.cases import load_retrieval_cases  # noqa: E402
+from evaluation.evaluator import compute_retrieval_metrics  # noqa: E402
+from mcp.knowledge_base import KnowledgeBase  # noqa: E402
+from mcp.tool_manager import MCPToolManager, Tool, ToolEffect  # noqa: E402
 
 
 def _llm_config() -> dict:

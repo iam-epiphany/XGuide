@@ -89,11 +89,11 @@ def _read_demo_benchmark() -> dict:
 
 
 def _pct(value) -> str:
-    return f"{value:.1%}" if isinstance(value, (int, float)) else "—"
+    return f"{value:.1%}" if isinstance(value, int | float) else "—"
 
 
 def _fmt(value, digits: int = 3) -> str:
-    return f"{value:.{digits}f}" if isinstance(value, (int, float)) else "—"
+    return f"{value:.{digits}f}" if isinstance(value, int | float) else "—"
 
 
 def build_markdown(summary: dict) -> str:

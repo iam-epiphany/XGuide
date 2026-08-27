@@ -148,7 +148,7 @@ class PersonalStore:
     def _add_todo_sync(
         self, user_id: str, content: str, kind: str, due_at: Optional[str]
     ) -> Dict[str, Any]:
-        created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        created = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._connect() as conn:
             cur = conn.execute(
                 """INSERT INTO todos (user_id, content, kind, due_at, created_at)
@@ -209,7 +209,7 @@ class PersonalStore:
         return await self._run(self._set_todo_done_sync, user_id, todo_id, done)
 
     def _set_todo_done_sync(self, user_id: str, todo_id: int, done: bool) -> bool:
-        completed = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if done else None
+        completed = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S") if done else None
         with self._connect() as conn:
             cur = conn.execute(
                 """UPDATE todos SET done = ?, completed_at = ?

@@ -195,7 +195,7 @@ class SkillManager:
         self._record_discovery(message, matched_names)
         logger.info(
             "Skills 注入: 目录 %d 个, 命中提示 %s, message=%r",
-            len(self._skills), matched_names and "、".join(s.name for s in matched_names) or "-",
+            len(self._skills), (matched_names and "、".join(s.name for s in matched_names)) or "-",
             (message or "")[:80],
         )
         return (

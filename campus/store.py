@@ -59,7 +59,7 @@ class CampusInfoStore:
                 status[fname] = "missing"
                 continue
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     self._data[fname] = json.load(f)
                 status[fname] = "ok"
             except Exception as ex:
@@ -86,7 +86,7 @@ class CampusInfoStore:
         direction：方向关键词（南→北 / 北→南 / 南校区 / 北校区），不传则查两个方向。
         返回每方向的：下一班发车时间、剩余分钟、发车点、末班车信息。
         """
-        now = now or datetime.now()
+        now = now or datetime.now().astimezone()
         data = self._data.get("shuttle_schedule.json", {})
         routes = data.get("routes", [])
         if not routes:
@@ -114,7 +114,10 @@ class CampusInfoStore:
 
             if next_dep is None:
                 continue
-            dep_dt = datetime.combine(next_date, dtime.fromisoformat(next_dep))
+            # 时刻表时间无时区语义；与 now 保持同一 tz（naive/aware 跟随入参）
+            dep_dt = datetime.combine(
+                next_date, dtime.fromisoformat(next_dep), tzinfo=now.tzinfo,
+            )
             minutes = max(0, int((dep_dt - now).total_seconds() // 60))
             results.append({
                 "route": name,
@@ -174,7 +177,7 @@ class CampusInfoStore:
             return buildings
         result = []
         for b in buildings:
-            names = [b.get("name", "")] + [a for a in b.get("aliases", [])]
+            names = [b.get("name", ""), *list(b.get("aliases", []))]
             if any(keyword in n for n in names if n):
                 result.append(b)
         return result
@@ -188,7 +191,7 @@ class CampusInfoStore:
             return venues
         result = []
         for v in venues:
-            names = [v.get("name", "")] + [a for a in v.get("aliases", [])]
+            names = [v.get("name", ""), *list(v.get("aliases", []))]
             if any(keyword in n for n in names if n):
                 result.append(v)
         return result

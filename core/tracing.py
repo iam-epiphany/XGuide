@@ -34,7 +34,7 @@ _traces: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 
 
 class Span:
-    __slots__ = ("name", "started", "duration_ms", "meta")
+    __slots__ = ("duration_ms", "meta", "name", "started")
 
     def __init__(self, name: str, **meta: Any):
         self.name = name

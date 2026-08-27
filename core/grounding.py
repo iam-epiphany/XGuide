@@ -127,7 +127,7 @@ def _protect_quotes(text: str) -> Tuple[str, List[str]]:
     """把引号片段替换为占位符（\x01i\x01），拆分期间逗号不生效。"""
     spans: List[str] = []
 
-    def _save(m: "re.Match") -> str:
+    def _save(m: re.Match) -> str:
         spans.append(m.group(0))
         return f"\x01{len(spans) - 1}\x01"
 
@@ -218,7 +218,7 @@ async def _batch_cosines(claim: str, evidences: List[Dict[str, Any]]) -> List[fl
             if not ny:
                 out.append(0.0)
                 continue
-            dot = sum(float(i) * float(j) for i, j in zip(x, y))
+            dot = sum(float(i) * float(j) for i, j in zip(x, y, strict=False))
             out.append(float(dot / (nx * ny)))
         return out
     except Exception:
@@ -249,17 +249,17 @@ async def _batch_cosines_multi(
         claim_vecs, ev_vecs = vecs[:n], vecs[n:]
         ev_norms = [sum(float(i) * float(i) for i in v) ** 0.5 for v in ev_vecs]
         out: Dict[str, List[float]] = {}
-        for c, cv in zip(claims, claim_vecs):
+        for c, cv in zip(claims, claim_vecs, strict=False):
             nc = sum(float(i) * float(i) for i in cv) ** 0.5
             if not nc:
                 out[c] = [0.0] * len(evidences)
                 continue
             row = []
-            for v, nv in zip(ev_vecs, ev_norms):
+            for v, nv in zip(ev_vecs, ev_norms, strict=False):
                 if not nv:
                     row.append(0.0)
                     continue
-                dot = sum(float(i) * float(j) for i, j in zip(cv, v))
+                dot = sum(float(i) * float(j) for i, j in zip(cv, v, strict=False))
                 row.append(float(dot / (nc * nv)))
             out[c] = row
         return out
@@ -277,7 +277,7 @@ async def cosine_sim(a: str, b: str) -> float:
             return 0.0
         vecs = await asyncio.to_thread(embedder.embed_documents, [a, b[:500]])
         x, y = vecs[0], vecs[1]
-        dot = sum(float(i) * float(j) for i, j in zip(x, y))
+        dot = sum(float(i) * float(j) for i, j in zip(x, y, strict=False))
         nx = sum(float(i) * float(i) for i in x) ** 0.5
         ny = sum(float(i) * float(i) for i in y) ** 0.5
         return float(dot / (nx * ny)) if nx and ny else 0.0
@@ -843,7 +843,7 @@ def _apply_judge(
         return
     verdict = str(verdict_info.get("verdict", "")).strip().lower()
     ids = verdict_info.get("evidence_ids") or []
-    valid = [int(i) for i in ids if isinstance(i, (int, float, str))
+    valid = [int(i) for i in ids if isinstance(i, int | float | str)
              and str(i).lstrip("-").isdigit() and 1 <= int(i) <= len(evidences)]
     if verdict == "supported" and valid:
         idx = valid[0] - 1
@@ -860,7 +860,7 @@ def _apply_judge(
 async def decide_claim(
     claim: str,
     evidences: List[Dict[str, Any]],
-    entailment_judge: Optional["LLMEntailmentJudge"] = None,
+    entailment_judge: Optional[LLMEntailmentJudge] = None,
 ) -> Dict[str, Any]:
     """单个 Claim 的完整判定（评测/脚本/外部复用入口）。
 
@@ -920,7 +920,7 @@ class LLMEntailmentJudge:
         self, claims: List[str], evidences: List[Dict[str, Any]],
     ) -> Dict[str, Dict[str, Any]]:
         evidence_lines = "\n".join(
-            f"{i + 1}. {str(ev.get('title', ''))}：{str(ev.get('content', ''))[:400]}"
+            f"{i + 1}. {ev.get('title', '')!s}：{str(ev.get('content', ''))[:400]}"
             for i, ev in enumerate(evidences)
         )[:4000]
         claim_lines = "\n".join(f"- {c}" for c in claims)
@@ -1008,7 +1008,7 @@ def strip_citation_markers(answer: str) -> str:
     text = answer or ""
     # 先保护 Markdown 链接（占位符替换），再删独立 [n]
     links: List[str] = []
-    def _save(m: "re.Match") -> str:
+    def _save(m: re.Match) -> str:
         links.append(m.group(0))
         return f"\x00{len(links) - 1}\x00"
     text = re.sub(r"\[[^\]]*\]\([^)]*\)", _save, text)
@@ -1097,7 +1097,7 @@ async def annotate_citations(
     indices: set = set()
     rec_pos = 0
     out_parts: List[str] = []
-    for part, clauses in zip(parts, parts_claims):
+    for part, clauses in zip(parts, parts_claims, strict=False):
         if not clauses:
             out_parts.append(part)
             continue

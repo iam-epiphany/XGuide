@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 import json
 
 import httpx
@@ -254,7 +254,8 @@ def test_todo_tool_full_flow(tmp_path):
     ctx = _ctx(tmp_path)
     added = asyncio.run(add_todo_handler(
         {"content": "交实验报告", "kind": "ddl", "due_at": "2026-09-14"}, ctx))
-    assert added["available"] is True and added["todo"]["kind"] == "ddl"
+    assert added["available"] is True
+    assert added["todo"]["kind"] == "ddl"
 
     listed = asyncio.run(query_todo_handler({"status": "open"}, ctx))
     assert listed["total"] == 1
@@ -275,7 +276,7 @@ def test_add_todo_requires_content(tmp_path):
 def test_ddl_tool_returns_countdown(tmp_path):
     ctx = _ctx(tmp_path)
     service = ctx["personal_service"]
-    today = date.today()
+    today = datetime.now().astimezone().date()
     asyncio.run(service.add_todo("u1", "高数期中", kind="exam", due_at=(today + timedelta(days=14)).isoformat()))
     result = asyncio.run(query_ddl_handler({"horizon_days": 30}, ctx))
     assert result["total"] == 1

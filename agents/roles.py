@@ -78,7 +78,7 @@ class AgentStats:
     success:   int   = 0
     total_ms:  float = 0.0
     in_flight: int   = 0
-    _latencies: "deque[float]" = field(
+    _latencies: deque[float] = field(
         default_factory=lambda: deque(maxlen=200), repr=False,
     )
 
@@ -836,7 +836,7 @@ class BaseAgent:
         if not evidence:
             return "", []
         lines = [
-            f"[{i + 1}] {str(item.get('title', ''))}: {str(item.get('content', ''))}"
+            f"[{i + 1}] {item.get('title', '')!s}: {item.get('content', '')!s}"
             for i, item in enumerate(items)
         ]
         text = "[系统已检索资料，请严格基于以下资料回答：]\n" + "\n".join(lines)

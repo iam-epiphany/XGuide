@@ -76,7 +76,7 @@ def main() -> int:
     i = 0
     for domain in _DOMAIN_TEMPLATES:
         n = len(_DOMAIN_TEMPLATES[domain])
-        tpl_index[domain] = list(zip(_DOMAIN_TEMPLATES[domain], tpl_vecs[i:i + n]))
+        tpl_index[domain] = list(zip(_DOMAIN_TEMPLATES[domain], tpl_vecs[i:i + n], strict=False))
         i += n
 
     positives, negatives, margins = [], [], []
@@ -108,7 +108,7 @@ def main() -> int:
     threshold = round((min_pos + max_neg) / 2, 4)
     margins_sorted = sorted(margins)
     margin_rec = round(margins_sorted[len(margins_sorted) // 4], 4)  # 第一四分位（保守）
-    print(f"\n建议配置（写入 .env）:")
+    print("\n建议配置（写入 .env）:")
     print(f"  ECHOGUIDE_INTENT_EMBEDDING_THRESHOLD={threshold}")
     print(f"  ECHOGUIDE_INTENT_EMBEDDING_MARGIN={margin_rec}")
     print(f"\n参考：正例 margin 均值 {statistics.mean(margins):.4f}，"

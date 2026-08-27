@@ -88,7 +88,7 @@ class ResponseVerifier:
         if self._client is None or not self._model:
             return None
         evidence = "\n".join(
-            f"- {str(item.get('title', ''))}: {str(item.get('content', ''))[:400]}"
+            f"- {item.get('title', '')!s}: {str(item.get('content', ''))[:400]}"
             for item in (tool_evidence or [])
         )[:3000]
         system = (

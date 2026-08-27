@@ -179,7 +179,7 @@ def _entry_id(query: str, user_id: Optional[str] = None) -> str:
     """
     if user_id:
         return hashlib.md5(
-            f"{user_id}\x00{query}".encode("utf-8")
+            f"{user_id}\x00{query}".encode()
         ).hexdigest()
     return hashlib.md5(query.strip().encode("utf-8")).hexdigest()
 

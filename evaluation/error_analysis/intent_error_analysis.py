@@ -37,8 +37,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 load_dotenv()
 
-from core.intent_recognizer import IntentDomain, IntentRecognizer
-from evaluation.cases import load_intent_cases
+from core.intent_recognizer import IntentDomain, IntentRecognizer  # noqa: E402
+from evaluation.cases import load_intent_cases  # noqa: E402
 
 
 def _llm_config() -> dict:
@@ -183,7 +183,7 @@ async def main() -> int:
         "error_stages": stage_counts,
         "per_domain": {k: {**v, "accuracy": round(v["correct"] / v["total"], 4)} for k, v in sorted(per_domain.items())},
         "confusion": dict(sorted(confusion.items(), key=lambda kv: -kv[1])),
-        "errors": [r for r in errors],
+        "errors": list(errors),
         "all": records,
     }
 

@@ -20,7 +20,7 @@ def test_weighted_score_is_deterministic_and_not_gpa():
     assert "不是学校官方 GPA" in result["disclaimer"]
 
 
-@pytest.mark.parametrize("credits,score", [(0, 80), (2, 101), (2, -1)])
+@pytest.mark.parametrize(("credits", "score"), [(0, 80), (2, 101), (2, -1)])
 def test_weighted_score_rejects_invalid_values(credits, score):
     with pytest.raises(ValueError):
         asyncio.run(calculate_weighted_score_handler({"courses": [{"credits": credits, "score": score}]}, {}))
@@ -30,9 +30,11 @@ def test_affairs_process_returns_versioned_provenance():
     result = asyncio.run(query_affairs_process_handler({"service": "校园卡补办"}, {}))
     assert result["found"] is True
     process = result["processes"][0]
-    assert process["materials"] and process["steps"]
+    assert process["materials"]
+    assert process["steps"]
     assert process["source_url"].startswith("https://")
-    assert process["updated_at"] and process["version"]
+    assert process["updated_at"]
+    assert process["version"]
 
 
 def test_affairs_process_unknown_is_explicit():
@@ -47,7 +49,8 @@ def test_it_diagnostic_matches_network_branch():
     }, {}))
     assert result["matched"] is True
     diagnosis = result["diagnosis"]
-    assert diagnosis["steps"] and diagnosis["next_branch"]
+    assert diagnosis["steps"]
+    assert diagnosis["next_branch"]
     assert diagnosis["source_url"].startswith("https://")
 
 

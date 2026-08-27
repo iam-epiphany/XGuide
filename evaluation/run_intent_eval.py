@@ -33,9 +33,9 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 load_dotenv()  # 加载 .env（ANTHROPIC_API_KEY 等）
 
-from core.intent_recognizer import IntentDomain, IntentRecognizer
-from evaluation.cases import load_intent_cases
-from evaluation.evaluator import IntentEvaluator
+from core.intent_recognizer import IntentDomain, IntentRecognizer  # noqa: E402
+from evaluation.cases import load_intent_cases  # noqa: E402
+from evaluation.evaluator import IntentEvaluator  # noqa: E402
 
 
 def _llm_config() -> dict:

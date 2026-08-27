@@ -57,7 +57,7 @@ def group_table_rows(chunks: list[str]) -> int:
     broken = 0
     in_table = False
     for c in chunks:
-        rows = [l for l in c.split("\n") if l.lstrip().startswith("|")]
+        rows = [line for line in c.split("\n") if line.lstrip().startswith("|")]
         if not rows:
             in_table = False
             continue
@@ -72,7 +72,7 @@ def analyze(kb: KnowledgeBase, text: str, chunk_size: int, overlap: int) -> dict
 
     def heading_blocks(chunks: list[str]) -> int:
         """旧口径：块内任何行以 # 开头（标题行作为正文被切进块）。"""
-        return sum(1 for c in chunks if any(_HEADING_RE.match(l) for l in c.split("\n")))
+        return sum(1 for c in chunks if any(_HEADING_RE.match(line) for line in c.split("\n")))
 
     def chain_blocks(chunks: list[str]) -> int:
         """新口径：块首行是标题链（去井号后以 > 连接，单标题块首即标题）。"""

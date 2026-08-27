@@ -289,7 +289,7 @@ class MCPToolManager:
             return ToolResult(success=True, data=data, tool_name=name,
                               latency_ms=latency, reranked=reranked)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             tool.stats.failed += 1
             tool.stats.consecutive_fails += 1
             tool.breaker.record_failure()
@@ -367,7 +367,7 @@ class MCPToolManager:
             s, e = raw.find("["), raw.rfind("]") + 1
             queries = json.loads(raw[s:e])
             # 原始查询也保留，去重
-            return list(dict.fromkeys([query] + queries))
+            return list(dict.fromkeys([query, *queries]))
         except Exception as ex:
             logger.warning(f"查询改写失败，使用原始查询: {ex}")
             return [query]
@@ -586,20 +586,20 @@ class MCPToolManager:
             try:
                 return int(str(value).strip())
             except (TypeError, ValueError):
-                raise ValueError(f"参数 {key} 无法转换为 integer: {value!r}")
+                raise ValueError(f"参数 {key} 无法转换为 integer: {value!r}") from None
         if expected == "number":
             if isinstance(value, bool):
                 raise ValueError(f"参数 {key} 类型错误: 期望 number")
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 return value
             try:
                 return float(str(value).strip())
             except (TypeError, ValueError):
-                raise ValueError(f"参数 {key} 无法转换为 number: {value!r}")
+                raise ValueError(f"参数 {key} 无法转换为 number: {value!r}") from None
         if expected == "boolean":
             if isinstance(value, bool):
                 return value
-            if isinstance(value, (int, float)) and value in (0, 1):
+            if isinstance(value, int | float) and value in (0, 1):
                 return bool(value)
             if isinstance(value, str):
                 lowered = value.strip().lower()
@@ -626,9 +626,9 @@ class MCPToolManager:
         required = schema.get("required", [])
         properties = schema.get("properties", {})
 
-        for field in required:
-            if field not in params:
-                raise ValueError(f"工具 {tool.name} 缺少必需参数: {field}")
+        for name in required:
+            if name not in params:
+                raise ValueError(f"工具 {tool.name} 缺少必需参数: {name}")
 
         for key, value in params.items():
             if key in properties:

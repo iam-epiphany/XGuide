@@ -128,7 +128,7 @@ class StreamableHTTPClient:
         try:
             parsed = json.loads(body)
         except (TypeError, ValueError) as ex:
-            raise MCPProtocolError(f"响应不是合法 JSON: {ex}")
+            raise MCPProtocolError(f"响应不是合法 JSON: {ex}") from ex
         if isinstance(parsed, dict) and "error" in parsed:
             err = parsed["error"]
             raise MCPProtocolError(f"JSON-RPC 错误 {err.get('code')}: {err.get('message')}")

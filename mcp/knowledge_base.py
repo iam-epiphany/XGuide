@@ -312,7 +312,7 @@ class KnowledgeBase:
             for doc, meta, dist in zip(
                 results["documents"][0],
                 results["metadatas"][0],
-                results["distances"][0],
+                results["distances"][0], strict=False,
             ):
                 # cosine 距离的定义为 1-cosine_similarity；显式配置 collection
                 # 后该换算才成立。为应对数值误差夹紧到 [0, 1]。
@@ -541,7 +541,7 @@ class KnowledgeBase:
 
             # para：段落粒度贪心合并
             effective = chunk_size - len(buf_head)
-            if pend and len("\n\n".join(pend + [unit])) <= effective:
+            if pend and len("\n\n".join([*pend, unit])) <= effective:
                 pend.append(unit)
                 continue
 

@@ -74,7 +74,7 @@ async def import_schedule_file(
         try:
             docs = json.loads(text)
         except json.JSONDecodeError as e:
-            raise HTTPException(400, f"JSON 解析失败: {e}")
+            raise HTTPException(400, f"JSON 解析失败: {e}") from e
         if isinstance(docs, dict):
             docs = docs.get("courses", [])
         if not isinstance(docs, list):

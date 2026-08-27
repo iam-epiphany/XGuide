@@ -19,6 +19,7 @@ import threading
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from mcp import embeddings
 from mcp.embeddings import (
@@ -199,12 +200,9 @@ def test_reranker_rerank_topk_preserves_items():
 def test_ensure_model_raises_when_all_files_unavailable():
     """模型文件全部下载失败 → 抛错（调用方降级，不静默返回坏模型）。"""
     with patch("mcp.embeddings._download_file", return_value=False):
-        try:
+        with pytest.raises(RuntimeError) as exc:
             _ensure_model("fake/repo", ["onnx/model.onnx"], embeddings.model_cache_dir())
-        except RuntimeError as ex:
-            assert "fake/repo" in str(ex)
-        else:
-            raise AssertionError("应抛 RuntimeError")
+        assert "fake/repo" in str(exc.value)
 
 
 def test_singleton_cooldown_skips_retry():

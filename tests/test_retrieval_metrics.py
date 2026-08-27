@@ -15,7 +15,8 @@ def test_retrieval_metrics_hit_recall_mrr():
     assert m["hit_rate@K"] == round(2 / 3, 4)
     assert m["recall@K"] == round(2 / 3, 4)   # 前两个用例的相关被召回，第三个未召回
     assert m["mrr"] == round((1.0 + 0.5 + 0.0) / 3, 4)
-    assert m["total"] == 3 and m["top_k"] == 2
+    assert m["total"] == 3
+    assert m["top_k"] == 2
 
 
 def test_retrieval_recall_partial():
@@ -31,19 +32,25 @@ def test_retrieval_recall_partial():
 def test_citation_correctness_all_valid():
     answer = "选课分预选、正选两个阶段 [1]，退改选时间见通知 [2]。"
     c = citation_correctness(answer, ["文档A", "文档B", "文档C"])
-    assert c["total"] == 2 and c["valid"] == 2 and c["invalid"] == []
-    assert c["score"] == 1.0 and c["has_citation"] is True
+    assert c["total"] == 2
+    assert c["valid"] == 2
+    assert c["invalid"] == []
+    assert c["score"] == 1.0
+    assert c["has_citation"] is True
 
 
 def test_citation_correctness_invalid_index():
     answer = "选课说明 [1]，细节见 [5]。"
     c = citation_correctness(answer, ["文档A", "文档B"])
-    assert c["total"] == 2 and c["valid"] == 1
+    assert c["total"] == 2
+    assert c["valid"] == 1
     assert c["invalid"] == [5]
     assert c["score"] == 0.5
 
 
 def test_citation_correctness_no_citation():
     c = citation_correctness("没有任何引用的回答", ["文档A"])
-    assert c["total"] == 0 and c["score"] is None and c["has_citation"] is False
+    assert c["total"] == 0
+    assert c["score"] is None
+    assert c["has_citation"] is False
     assert c["has_citation"] is False

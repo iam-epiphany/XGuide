@@ -103,7 +103,7 @@ def find_sensitive_labels(value: Any) -> set[str]:
                     labels.add("environment")
                 visit(child)
             return
-        if isinstance(item, (list, tuple, set, frozenset)):
+        if isinstance(item, list | tuple | set | frozenset):
             for child in item:
                 visit(child)
             return

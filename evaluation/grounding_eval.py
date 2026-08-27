@@ -26,7 +26,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import core.grounding as g
+import core.grounding as g  # noqa: E402
 
 CASES = ROOT / "evaluation" / "cases" / "grounding_cases.json"
 GROUNDING_PY = ROOT / "core" / "grounding.py"
@@ -54,7 +54,7 @@ def evaluate(cases: list[dict], results: list[dict]) -> dict:
     strict_ok = 0
     strict_total = 0
     citation_errors = []
-    for case, rec in zip(cases, results):
+    for case, rec in zip(cases, results, strict=False):
         expected = case.get("expected", "unsupported")
         predicted = rec["predicted"]
         if expected == "skip":
@@ -165,7 +165,7 @@ def grid_metrics(cases: list[dict], pre: list[dict], min_dice: float, min_cos: f
 
 def print_report(cases: list[dict], results: list[dict], stats: dict, grid: list[dict] | None) -> None:
     print("\n=== 逐用例结果 ===")
-    for case, rec in zip(cases, results):
+    for case, rec in zip(cases, results, strict=False):
         print(format_case_line(case, rec))
     print("\n=== 指标（positive = supported；skipped 不计入）===")
     print(f"  TP={stats['tp']} FP={stats['fp']} FN={stats['fn']} TN={stats['tn']}")
@@ -179,9 +179,9 @@ def print_report(cases: list[dict], results: list[dict], stats: dict, grid: list
         print(f"  引用编号错误: {stats['citation_errors']}")
     else:
         print("  引用编号全部命中 expected_evidence")
-    fps = [(c["id"], c["claim"]) for c, r in zip(cases, results)
+    fps = [(c["id"], c["claim"]) for c, r in zip(cases, results, strict=False)
            if r["predicted"] == POSITIVE and c.get("expected") not in (POSITIVE, "skip")]
-    fns = [(c["id"], c["claim"]) for c, r in zip(cases, results)
+    fns = [(c["id"], c["claim"]) for c, r in zip(cases, results, strict=False)
            if r["predicted"] != POSITIVE and c.get("expected") == POSITIVE]
     print(f"\n  False Positive（误挂引用）: {fps or '无'}")
     print(f"  False Negative（漏挂引用）: {fns or '无'}")

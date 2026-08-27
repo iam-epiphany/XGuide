@@ -132,7 +132,7 @@ def _cosine(a: List[float], b: List[float]) -> float:
     if len(a) != len(b):
         logger.warning(f"向量维度不一致（{len(a)} vs {len(b)}），跳过相似度计算")
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na  = sum(x * x for x in a) ** 0.5
     nb  = sum(x * x for x in b) ** 0.5
     return dot / (na * nb) if na and nb else 0.0

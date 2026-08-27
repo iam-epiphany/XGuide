@@ -17,7 +17,7 @@ class _FakeCollection:
         self.data: dict[str, tuple[str, dict]] = {}
 
     def upsert(self, ids, documents, metadatas) -> None:
-        for i, d, m in zip(ids, documents, metadatas):
+        for i, d, m in zip(ids, documents, metadatas, strict=False):
             self.data[i] = (d, m)
 
     def count(self) -> int:
@@ -315,7 +315,7 @@ def test_oversized_table_own_block_even_over_budget():
     chunks = _kb()._chunk_text(text, chunk_size=100, overlap=20)
     assert len(chunks) == 1
     # header + 分隔行 + 29 数据行全部完整保留（表格是原子单元）
-    table_lines = [l for l in chunks[0].split("\n") if l.startswith("|")]
+    table_lines = [line for line in chunks[0].split("\n") if line.startswith("|")]
     assert len(table_lines) == 31
     assert "| 第29周 | 事项29 |" in chunks[0]
 

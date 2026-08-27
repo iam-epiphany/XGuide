@@ -34,7 +34,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 load_dotenv()
 
-from evaluation.cases import load_dialog_cases
+from evaluation.cases import load_dialog_cases  # noqa: E402
 
 
 def extract_citations(answer: str) -> list[int]:

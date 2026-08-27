@@ -236,7 +236,7 @@ class TaskPlanner:
 
     # ── 主入口 ────────────────────────────────────────────────────────────────
 
-    async def plan(self, req: "Request", domain: IntentDomain, action: IntentAction) -> ExecutionPlan:
+    async def plan(self, req: Request, domain: IntentDomain, action: IntentAction) -> ExecutionPlan:
         """
         生成 ExecutionPlan：Fast Path 先判；判 single 但"拿不准"时 LLM 规划升级。
         返回前对 REQUEST 任务做最小权限兜底（写工具提示，见 _apply_write_hints）。
@@ -273,7 +273,7 @@ class TaskPlanner:
 
     # ── Fast Path（本地规则）────────────────────────────────────────────────
 
-    def _fast_plan(self, req: "Request", domain: IntentDomain, action: IntentAction) -> ExecutionPlan:
+    def _fast_plan(self, req: Request, domain: IntentDomain, action: IntentAction) -> ExecutionPlan:
         """本地规则生成：规则链 → 并行 → 单任务。零 LLM 调用。"""
         # 1. 复合规则命中 → 依赖任务链
         rule_tasks = self._apply_rules(req)
@@ -356,7 +356,7 @@ class TaskPlanner:
         return m.group(1) if m else "校园事务"
 
     @classmethod
-    def _plan_schedule_errand(cls, req: "Request") -> Optional[List[Task]]:
+    def _plan_schedule_errand(cls, req: Request) -> Optional[List[Task]]:
         """
         高频业务场景 Fast Path（确定性规则，非 DAG 能力的主要证明）：
         个人日程 + 线下办事 + 记待办 的复合请求。
@@ -412,7 +412,7 @@ class TaskPlanner:
 
     RULES = ["_plan_schedule_errand"]
 
-    def _apply_rules(self, req: "Request") -> Optional[List[Task]]:
+    def _apply_rules(self, req: Request) -> Optional[List[Task]]:
         for rule_name in self.RULES:
             rule = getattr(self, rule_name)
             tasks = rule(req)
@@ -422,7 +422,7 @@ class TaskPlanner:
 
     # ── 并行目标（多领域判定）───────────────────────────────────────────────
 
-    def _collaboration_targets(self, req: "Request", domain: IntentDomain) -> List[IntentDomain]:
+    def _collaboration_targets(self, req: Request, domain: IntentDomain) -> List[IntentDomain]:
         """多领域目标判定：领域关键词统一来自 core.domains.DOMAIN_KEYWORDS。"""
         msg = req.message.lower()
         targets: List[IntentDomain] = []
@@ -454,7 +454,7 @@ class TaskPlanner:
         r"[，。；、,;]+|(?:同时|另外|顺便|然后|再|还要|以及|并且)"
     )
 
-    def _needs_llm_planning(self, req: "Request") -> bool:
+    def _needs_llm_planning(self, req: Request) -> bool:
         """
         升级预筛：本地判 single 后，判断这条请求是否值得升级 LLM 规划。
 
@@ -488,7 +488,7 @@ class TaskPlanner:
             return True
         return False
 
-    async def _llm_plan(self, req: "Request") -> Optional[ExecutionPlan]:
+    async def _llm_plan(self, req: Request) -> Optional[ExecutionPlan]:
         """一次轻量 LLM 调用输出任务链（含每个任务的 action），硬校验后采用。
 
         失败/非法 → None（调用方回落本地 Fast Path）。
@@ -549,7 +549,7 @@ class TaskPlanner:
     def _tasks_from_llm(
         self,
         raw_tasks: Optional[Any],
-        req: "Request",
+        req: Request,
     ) -> Optional[List[Task]]:
         """
         LLM 任务链硬校验（任一不满足 → None 整链作废）：
@@ -674,7 +674,7 @@ class TaskExecutor:
 
     async def execute(
         self,
-        req: "Request",
+        req: Request,
         tasks: List[Task],
         on_event: Optional[Any] = None,
         max_tasks: int = 6,  # 任务 DAG 上限（默认 6，可由 ExecutionPolicy 覆盖）
@@ -717,7 +717,7 @@ class TaskExecutor:
                 t0 = time.monotonic()
                 try:
                     r = await self._run_task(req, t, shared, on_event)
-                except Exception as ex:  # noqa: BLE001 —— 与 gather(return_exceptions) 语义一致
+                except Exception as ex:
                     r = ex
                 return t, r, (time.monotonic() - t0) * 1000
 
@@ -757,7 +757,7 @@ class Synthesizer:
 
     async def synthesize(
         self,
-        req: "Request",
+        req: Request,
         results: List[AgentResponse],
     ) -> str:
         parts = [

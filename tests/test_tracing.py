@@ -7,7 +7,7 @@ from core.tracing import begin_trace, end_trace, list_traces, span, sync_span
 
 
 def test_trace_records_spans_with_duration():
-    trace = begin_trace("test")
+    begin_trace("test")
     try:
         with sync_span("sync_op", key="v"):
             pass

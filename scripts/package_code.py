@@ -95,7 +95,7 @@ def count_lines(path: pathlib.Path) -> int:
     if not path.name.endswith(tuple(TEXT_SUFFIXES)):
         return 0
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
             return sum(1 for _ in fh)
     except OSError:
         return 0
@@ -103,7 +103,7 @@ def count_lines(path: pathlib.Path) -> int:
 
 def build_summary(files, total_lines):
     """生成 _AI_SUMMARY.md：结构树 + 规模 Top 文件 + 关键入口，方便 AI 快速定位。"""
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.datetime.now().astimezone().astimezone().strftime("%Y-%m-%d %H:%M:%S")
     top_dirs = {}
     for _, rel in files:
         parts = rel.split("/")
@@ -112,57 +112,57 @@ def build_summary(files, total_lines):
         else:
             top_dirs.setdefault(parts[0], []).append(rel)
 
-    L = []
-    L.append(f"# EchoGuide 代码包摘要（自动生成于 {now}）")
-    L.append("")
-    L.append(f"- 文件数：{len(files)}")
-    L.append(f"- 代码总行数：{total_lines:,}")
-    L.append("")
-    L.append("## 顶层结构")
-    L.append("")
-    L.append("```text")
-    L.append("EchoGuide/")
+    lines = []
+    lines.append(f"# EchoGuide 代码包摘要（自动生成于 {now}）")
+    lines.append("")
+    lines.append(f"- 文件数：{len(files)}")
+    lines.append(f"- 代码总行数：{total_lines:,}")
+    lines.append("")
+    lines.append("## 顶层结构")
+    lines.append("")
+    lines.append("```text")
+    lines.append("EchoGuide/")
     for name in sorted(top_dirs):
         n = len(top_dirs[name])
         note = DIR_NOTES.get(name, "")
         suffix = f"  {note}" if note else ""
-        L.append(f"├─ {name}/  ({n} 个文件){suffix}")
-    L.append("```")
-    L.append("")
-    L.append("## 代码规模 Top 20（按行数，供 AI 优先阅读）")
-    L.append("")
-    L.append("| 文件 | 行数 |")
-    L.append("|---|---:|")
+        lines.append(f"├─ {name}/  ({n} 个文件){suffix}")
+    lines.append("```")
+    lines.append("")
+    lines.append("## 代码规模 Top 20（按行数，供 AI 优先阅读）")
+    lines.append("")
+    lines.append("| 文件 | 行数 |")
+    lines.append("|---|---:|")
     for full, rel in sorted(files, key=lambda f: -count_lines(f[0]))[:20]:
         if count_lines(full) == 0:
             continue
-        L.append(f"| `{rel}` | {count_lines(full):,} |")
-    L.append("")
-    L.append("## 关键入口（快速定位）")
-    L.append("")
-    L.append("| 入口 | 位置 | 说明 |")
-    L.append("|---|---|---|")
-    L.append("| FastAPI 应用 | `api/main.py` | 全部路由；`/mcp` 端点 ~L992、MCP 工具注册 ~L220、SSE `/chat/stream` |")
-    L.append("| MCP 协议层 | `mcp/protocol.py` | JSON-RPC 2.0 / Streamable HTTP：initialize / tools/list / tools/call |")
-    L.append("| 工具框架 | `mcp/tool_manager.py` | 工具注册、熔断、TTL 缓存、查询改写→并行召回→去重→重排链路 |")
-    L.append("| Agentic RAG | `mcp/knowledge_base.py` | ChromaDB 检索；本地 bge Embedding/Rerank 在 `mcp/embeddings.py` |")
-    L.append("| Agent 编排 | `agents/` | QA/Executor 职责角色、领域挂载、复杂度闸门、Planner/DAG/Executor/Synthesizer、出口校验 |")
-    L.append("| 意图识别 | `core/` | 级联意图识别（Pattern→Embedding→LLM）与 Fast/Deep 复杂度闸门 |")
-    L.append("| 个人数据 | `personal/store.py` | SQLite 课表/待办/DDL，按 user_id 隔离 |")
-    L.append("| 分层记忆 | `memory/` | L0 原文 / L1 事实 / L2 场景 / L3 画像 + 上下文卸载 |")
-    L.append("| Guard | `echoguide_guard/` | Prompt 注入检测、限流、审计脱敏 |")
-    L.append("")
-    L.append("## 运行方式")
-    L.append("")
-    L.append("```bash")
-    L.append("pip install -r requirements.txt -r requirements-dev.txt")
-    L.append("python -m uvicorn api.main:app --port 8000   # 后端")
-    L.append("cd frontend && npm install && npm run dev    # 前端")
-    L.append("```")
-    L.append("")
-    L.append("配置：复制 `.env.example` 为 `.env` 填写 API Key（ANTHROPIC_API_KEY 等）。")
-    L.append("")
-    return "\n".join(L)
+        lines.append(f"| `{rel}` | {count_lines(full):,} |")
+    lines.append("")
+    lines.append("## 关键入口（快速定位）")
+    lines.append("")
+    lines.append("| 入口 | 位置 | 说明 |")
+    lines.append("|---|---|---|")
+    lines.append("| FastAPI 应用 | `api/main.py` | 全部路由；`/mcp` 端点 ~L992、MCP 工具注册 ~L220、SSE `/chat/stream` |")
+    lines.append("| MCP 协议层 | `mcp/protocol.py` | JSON-RPC 2.0 / Streamable HTTP：initialize / tools/list / tools/call |")
+    lines.append("| 工具框架 | `mcp/tool_manager.py` | 工具注册、熔断、TTL 缓存、查询改写→并行召回→去重→重排链路 |")
+    lines.append("| Agentic RAG | `mcp/knowledge_base.py` | ChromaDB 检索；本地 bge Embedding/Rerank 在 `mcp/embeddings.py` |")
+    lines.append("| Agent 编排 | `agents/` | QA/Executor 职责角色、领域挂载、复杂度闸门、Planner/DAG/Executor/Synthesizer、出口校验 |")
+    lines.append("| 意图识别 | `core/` | 级联意图识别（Pattern→Embedding→LLM）与 Fast/Deep 复杂度闸门 |")
+    lines.append("| 个人数据 | `personal/store.py` | SQLite 课表/待办/DDL，按 user_id 隔离 |")
+    lines.append("| 分层记忆 | `memory/` | L0 原文 / L1 事实 / L2 场景 / L3 画像 + 上下文卸载 |")
+    lines.append("| Guard | `echoguide_guard/` | Prompt 注入检测、限流、审计脱敏 |")
+    lines.append("")
+    lines.append("## 运行方式")
+    lines.append("")
+    lines.append("```bash")
+    lines.append("pip install -r requirements.txt -r requirements-dev.txt")
+    lines.append("python -m uvicorn api.main:app --port 8000   # 后端")
+    lines.append("cd frontend && npm install && npm run dev    # 前端")
+    lines.append("```")
+    lines.append("")
+    lines.append("配置：复制 `.env.example` 为 `.env` 填写 API Key（ANTHROPIC_API_KEY 等）。")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -170,7 +170,7 @@ def main() -> None:
     files = collect_files()
     total_lines = sum(count_lines(full) for full, _ in files)
 
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.datetime.now().astimezone().astimezone().strftime("%Y%m%d-%H%M%S")
     out_path = OUT_DIR / f"echoguide-code-{stamp}.zip"
 
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:

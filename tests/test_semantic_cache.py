@@ -144,7 +144,7 @@ class _FakeCollection:
         self.entries: dict = {}  # doc_id -> (doc, meta)
 
     def upsert(self, ids, documents, metadatas):
-        for i, doc, meta in zip(ids, documents, metadatas):
+        for i, doc, meta in zip(ids, documents, metadatas, strict=False):
             self.entries[i] = (doc, meta)
 
     def query(self, query_texts, n_results=1, where=None):
@@ -194,9 +194,11 @@ def test_user_cache_cross_user_isolation():
     assert len(user.entries) == 2
     # A 只能命中 A 的回答，B 只能命中 B 的回答
     hit_a = cache.get("推荐一下食堂", user_id="A", dependence="user")
-    assert hit_a and hit_a["response"] == "用户A的个性化回答（偏好清淡，推荐一食堂）"
+    assert hit_a
+    assert hit_a["response"] == "用户A的个性化回答（偏好清淡，推荐一食堂）"
     hit_b = cache.get("推荐一下食堂", user_id="B", dependence="user")
-    assert hit_b and hit_b["response"] == "用户B的个性化回答（偏好无辣，推荐二食堂）"
+    assert hit_b
+    assert hit_b["response"] == "用户B的个性化回答（偏好无辣，推荐二食堂）"
 
 
 def test_user_cache_hit_ignores_context_change():
@@ -205,10 +207,12 @@ def test_user_cache_hit_ignores_context_change():
     cache.put("推荐一下食堂", "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。", domain="campus_life", user_id="A", dependence="user")
     # 无 where 之外的指纹过滤，同用户重复查询直接命中
     hit = cache.get("推荐一下食堂", user_id="A", dependence="user")
-    assert hit and hit["response"] == "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。"
+    assert hit
+    assert hit["response"] == "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。"
     # 同一问题再次语义改写（FakeCollection 距离固定 1.0）仍命中
     hit2 = cache.get("推荐个食堂", user_id="A", dependence="user")
-    assert hit2 and hit2["response"] == "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。"
+    assert hit2
+    assert hit2["response"] == "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。"
 
 
 def test_skip_read_counts_bypass_not_miss():
@@ -225,7 +229,8 @@ def test_skip_write_silently_skipped():
     """skip 写入 → 静默跳过（不入 Global/User，也不打 warning）。"""
     cache, g, user = _cache()
     cache.put("那几点开门？", "食堂 7:00 开门，早餐时段人较少，建议错峰就餐。", domain="campus_life", user_id="123", dependence="skip")
-    assert len(g.entries) == 0 and len(user.entries) == 0
+    assert len(g.entries) == 0
+    assert len(user.entries) == 0
 
 
 def test_user_tier_never_falls_back_to_global():
@@ -244,7 +249,8 @@ def test_anonymous_user_skips_read_and_write():
     cache, g, user = _cache()
     # 写：user 但匿名 → 不入任何缓存
     cache.put("推荐一下食堂", "上下文相关回答", domain="campus_life", user_id="anonymous", dependence="user")
-    assert len(g.entries) == 0 and len(user.entries) == 0
+    assert len(g.entries) == 0
+    assert len(user.entries) == 0
     # 读：跳过（计 bypass，不算 miss）
     assert cache.get("推荐一下食堂", user_id="anonymous", dependence="user") is None
     assert cache._bypass == 1
@@ -257,7 +263,8 @@ def test_global_cache_normal_scenario_unchanged():
     cache.put("选课分几个阶段？", "选课一般分为预选、正选、退改选几个阶段。", domain="academic", dependence="global")
     assert len(g.entries) == 1
     hit = cache.get("选课分几个阶段？", dependence="global")
-    assert hit and hit["response"] == "选课一般分为预选、正选、退改选几个阶段。"
+    assert hit
+    assert hit["response"] == "选课一般分为预选、正选、退改选几个阶段。"
     assert hit["tier"] == "global"
     # 任意用户都可读 Global
     assert cache.get("选课分几个阶段？", user_id="u1", dependence="global") is not None
@@ -352,7 +359,8 @@ def _run_chat(user_id, context_text="", message="南校区食堂几点关门？"
 def test_chat_fact_query_reads_global():
     """无记忆上下文的事实查询 → dependence="global"（只读 Global）。"""
     cache = _run_chat("u1")
-    assert cache.gets and cache.gets[0] == ("南校区食堂几点关门？", "u1", "global")
+    assert cache.gets
+    assert cache.gets[0] == ("南校区食堂几点关门？", "u1", "global")
 
 
 def test_explicit_benchmark_request_bypasses_semantic_cache(monkeypatch):
@@ -372,14 +380,16 @@ def test_explicit_benchmark_request_bypasses_semantic_cache(monkeypatch):
 def test_chat_fact_query_with_history_still_reads_global():
     """P0-1（API 层）：事实查询即使有历史上下文也判 global（不再被指纹强制进 User 层）。"""
     cache = _run_chat("u1", context_text="[最近对话]\nuser: 你好\nassistant: 你好！")
-    assert cache.gets and cache.gets[0][0] == "南校区食堂几点关门？"
+    assert cache.gets
+    assert cache.gets[0][0] == "南校区食堂几点关门？"
     assert cache.gets[0][2] == "global"
 
 
 def test_chat_followup_skips_cache():
     """追问（强上下文依赖）→ dependence="skip"，get 内部直接 bypass。"""
     cache = _run_chat("u1", context_text="[最近对话]\nuser: 南校区食堂几点关门？\nassistant: 22:00", message="那几点开门？")
-    assert cache.gets and cache.gets[0][2] == "skip"
+    assert cache.gets
+    assert cache.gets[0][2] == "skip"
 
 
 def test_chat_write_fact_query_goes_global_even_with_context():
@@ -402,5 +412,6 @@ def test_chat_write_personalized_goes_user_tier():
 def test_chat_anonymous_followup_not_written():
     """匿名 + 追问 → 读跳过、不写缓存。"""
     cache = _run_chat("anonymous", context_text="[最近对话]\nuser: 你好", message="那几点开门？")
-    assert cache.gets and cache.gets[0][2] == "skip"
+    assert cache.gets
+    assert cache.gets[0][2] == "skip"
     assert cache.puts == []

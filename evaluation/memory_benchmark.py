@@ -122,7 +122,7 @@ async def _layered_replay(tmp_db: str) -> dict:
     result["raw"] = {"turns": raw_count, "assert_full": raw_count == len(SIMULATED_TURNS)}
 
     # ── L1 原子事实（带证据链：source_turn → L0 原文）──────────────────────
-    last_turn = await store.get_last_turn("u_bench", "conv_1")
+    await store.get_last_turn("u_bench", "conv_1")
     facts = [
         {"fact": "用户在准备考研", "category": "status", "source_conv": "conv_1", "source_turn": 3},
         {"fact": "用户是通信工程学院大二学生", "category": "entity", "source_conv": "conv_1", "source_turn": 5},
@@ -147,7 +147,7 @@ async def _layered_replay(tmp_db: str) -> dict:
         await store.save_profile_version(
             "u_bench",
             json.dumps({"preferences": [f"偏好{i}"], "entities": {}}, ensure_ascii=False),
-            reason=f"signal: conv_1",
+            reason="signal: conv_1",
         )
     versions = await store.list_profile_versions("u_bench")
     oldest = await store.get_profile_version("u_bench", versions[-1]["id"])
@@ -158,7 +158,7 @@ async def _layered_replay(tmp_db: str) -> dict:
 
     # ── refs 卸载落盘：100% 找回 ────────────────────────────────────────────
     ref_ids = []
-    for i, text in enumerate(SIMULATED_TOOL_RESULTS):
+    for text in SIMULATED_TOOL_RESULTS:
         ref_ids.append(await store.save_ref("u_bench", "conv_1", "knowledge_search", text))
     recovered = 0
     for rid in ref_ids:

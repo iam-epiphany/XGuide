@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 import functools
 import json
 import math
@@ -77,7 +77,7 @@ def prepare_demo_data(client: httpx.Client) -> None:
             for item in items:
                 client.delete(f"/personal/todo/{item['id']}")
 
-    today = date.today()
+    today = datetime.now().astimezone().date()
     courses = [
         {"course": "智能系统导论", "day_of_week": today.weekday(), "start_time": "10:10", "end_time": "11:55", "location": "南校区B楼-203", "weeks": []},
         {"course": "计算机网络", "day_of_week": (today + timedelta(days=1)).weekday(), "start_time": "08:30", "end_time": "10:05", "location": "南校区A楼-101", "weeks": []},
@@ -169,7 +169,7 @@ def aggregate(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         f1_values.append(2 * precision * recall / max(1e-12, precision + recall))
     expected_complex = [CASE_BY_ID[row["case_id"]].get("expected_mode") != "single" for row in rows]
     predicted_complex = [(row.get("execution") or {}).get("mode") != "single" for row in rows]
-    gate_tp = sum(expected and predicted for expected, predicted in zip(expected_complex, predicted_complex))
+    gate_tp = sum(expected and predicted for expected, predicted in zip(expected_complex, predicted_complex, strict=False))
     def tagged(tag: str) -> List[Dict[str, Any]]:
         return [row for row in rows if tag in CASE_BY_ID[row["case_id"]].get("tags", [])]
 

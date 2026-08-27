@@ -226,7 +226,8 @@ def test_todo_crud_and_done(tmp_path):
     ok = asyncio.run(store.set_todo_done("u1", todo["id"], done=True))
     assert ok is True
     done_list = asyncio.run(store.list_todos("u1", status="done"))
-    assert len(done_list) == 1 and done_list[0]["done"] is True
+    assert len(done_list) == 1
+    assert done_list[0]["done"] is True
 
     # 用户隔离：u2 无法操作 u1 的待办
     assert asyncio.run(store.set_todo_done("u2", todo["id"])) is False
@@ -273,7 +274,8 @@ def test_upcoming_days_left(tmp_path):
 
     items = asyncio.run(service.upcoming("u1", horizon_days=30, today=today))
     assert [i["content"] for i in items] == ["已过期的作业", "交实验报告", "高数期中考试"]
-    assert items[0]["days_left"] == -2 and items[0]["status"] == "已过期"
+    assert items[0]["days_left"] == -2
+    assert items[0]["status"] == "已过期"
     assert items[1]["days_left"] == 3
     assert items[2]["status"] == "还剩14天"
 

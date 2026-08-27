@@ -167,14 +167,17 @@ def test_guard_scoped_negation():
     # 周六开放 vs 周六休息（同一作用域反义）→ 硬冲突
     rec = g.check_hard_consistency(
         "校园卡服务厅周六开放", "校园卡服务厅周日开放，周六休息")
-    assert rec["conflict"] and rec["level"] == "hard"
+    assert rec["conflict"]
+    assert rec["level"] == "hard"
     # claim 笼统（未限定星期）vs evidence 带限定的休息 → 软信号（不硬拦截）
     rec = g.check_hard_consistency("图书馆开放", "图书馆开放，周末休息")
-    assert rec["conflict"] is False and rec["level"] == "soft"
+    assert rec["conflict"] is False
+    assert rec["level"] == "soft"
     assert "[polarity_soft]" in rec["reasons"][0]
     # claim 限定 vs evidence 笼统否定 → 硬冲突
     rec = g.check_hard_consistency("行政楼周日开放", "行政楼不开放")
-    assert rec["conflict"] and rec["level"] == "hard"
+    assert rec["conflict"]
+    assert rec["level"] == "hard"
 
 
 def test_soft_guard_routes_high_confidence_to_judge():
@@ -275,7 +278,9 @@ def test_decide_claim_insufficient_when_unrelated():
 def test_match_evidence_backcompat():
     with _embed({}):  # 默认角度相同 → 余弦 1.0
         idx, dice, cos = _run(g.match_evidence("补办费用 20 元", [_ev("A", "补办费用 20 元")]))
-    assert idx == 0 and dice > 0.5 and cos == 1.0
+    assert idx == 0
+    assert dice > 0.5
+    assert cos == 1.0
 
 
 def test_match_evidence_empty():

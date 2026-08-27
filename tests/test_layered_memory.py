@@ -148,7 +148,8 @@ def test_layered_profile_versions(tmp_path):
         # 倒序：最新在前；回滚读取到最老版本
         assert "偏好2" in versions[0]["profile_json"]
         oldest = await store.get_profile_version("u1", versions[-1]["id"])
-        assert oldest is not None and "偏好0" in oldest["profile_json"]
+        assert oldest is not None
+        assert "偏好0" in oldest["profile_json"]
         # 用户隔离
         assert await store.count_profile_versions("u2") == 0
 
@@ -163,7 +164,8 @@ def test_layered_refs_roundtrip(tmp_path):
     async def scenario():
         rid = await store.save_ref("u1", "c1", "knowledge_search", "长文档" * 500)
         ref = await store.get_ref("u1", rid)
-        assert ref is not None and ref["content"] == "长文档" * 500
+        assert ref is not None
+        assert ref["content"] == "长文档" * 500
         assert ref["char_len"] == len("长文档" * 500)
         # 用户隔离：其他用户拿不到
         assert await store.get_ref("u2", rid) is None
@@ -182,7 +184,7 @@ def test_layered_prune(tmp_path):
         await store.add_facts("u1", [{"fact": "旧事实", "category": "status"}])
         fid = (await store.list_facts("u1"))[0]["id"]
         await store.deactivate_fact("u1", fid)  # 失效后才能被清理
-        for i in range(3):
+        for _i in range(3):
             await store.save_profile_version("u1", "{}", "r")
 
         stats = await store.prune(
@@ -475,9 +477,12 @@ def test_get_context_layers_and_trace(tmp_path, monkeypatch):
         assert "普通历史片段" in ctx.relevant_history
         # L0/L1/L3 计数来自分层存储：facts = 注入条数，facts_total = 可用总数
         trace = ctx.memory_trace["layers"]
-        assert trace["scenario"] == 1 and trace["segments"] == 1
-        assert trace["facts"] == 1 and trace["facts_total"] == 2
-        assert trace["raw"] == 0 and trace["profile_versions"] == 0
+        assert trace["scenario"] == 1
+        assert trace["segments"] == 1
+        assert trace["facts"] == 1
+        assert trace["facts_total"] == 2
+        assert trace["raw"] == 0
+        assert trace["profile_versions"] == 0
         # 摘要来自工作记忆
         assert ctx.summary == "会话摘要：讨论选课"
 

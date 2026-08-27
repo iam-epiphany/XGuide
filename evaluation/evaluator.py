@@ -347,16 +347,16 @@ class IntentEvaluator:
             })
 
         # 纯 Python 计算指标
-        correct = sum(p == g for p, g in zip(predictions, ground_truth))
+        correct = sum(p == g for p, g in zip(predictions, ground_truth, strict=False))
         accuracy = correct / len(predictions) if predictions else 0.0
 
         # 每类 F1
         labels = sorted(set(ground_truth + predictions))
         per_class: Dict[str, Dict[str, float]] = {}
         for label in labels:
-            tp = sum(p == label and g == label for p, g in zip(predictions, ground_truth))
-            fp = sum(p == label and g != label for p, g in zip(predictions, ground_truth))
-            fn = sum(p != label and g == label for p, g in zip(predictions, ground_truth))
+            tp = sum(p == label and g == label for p, g in zip(predictions, ground_truth, strict=False))
+            fp = sum(p == label and g != label for p, g in zip(predictions, ground_truth, strict=False))
+            fn = sum(p != label and g == label for p, g in zip(predictions, ground_truth, strict=False))
             prec = tp / (tp + fp) if (tp + fp) else 0.0
             rec  = tp / (tp + fn) if (tp + fn) else 0.0
             f1   = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
@@ -404,7 +404,7 @@ def compute_retrieval_metrics(
     hits, recalls, mrrs = [], [], []
     cases: List[Dict[str, Any]] = []
 
-    for res, rel in zip(results, relevant):
+    for res, rel in zip(results, relevant, strict=False):
         top_titles = [str(item.get("title", "")) for item in res[:top_k]]
         rel_set = set(rel)
         hit = any(t in rel_set for t in top_titles)
@@ -471,7 +471,7 @@ class RetrievalEvaluator:
             results.append(items)
             relevant.append(case.relevant_titles)
         metrics = compute_retrieval_metrics(results, relevant, top_k=top_k)
-        for case, detail in zip(cases, metrics["cases"]):
+        for case, detail in zip(cases, metrics["cases"], strict=False):
             detail["query"] = case.query
         return metrics
 
@@ -516,7 +516,7 @@ class EndToEndEvaluator:
         kwargs: Dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
-        client = AsyncAnthropic(**kwargs)
+        AsyncAnthropic(**kwargs)
 
         judge_kwargs: Dict[str, Any] = {"api_key": judge_api_key or api_key}
         if judge_base_url:
@@ -642,7 +642,7 @@ class EndToEndEvaluator:
         recommendations = self._recommendations(avg_scores, intent_metrics)
 
         report = EvalReport(
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now().astimezone().isoformat(),
             total=len(results),
             passed=passed_count,
             pass_rate=round(pass_rate, 4),

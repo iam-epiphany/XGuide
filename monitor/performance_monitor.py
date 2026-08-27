@@ -49,7 +49,7 @@ class Alert:
     message:     str
     value:       float
     threshold:   float
-    ts:          str = field(default_factory=lambda: datetime.now().isoformat())
+    ts:          str = field(default_factory=lambda: datetime.now().astimezone().isoformat())
     resolved:    bool = False
 
 
@@ -137,6 +137,7 @@ class PerformanceMonitor:
         self._tool_manager = tool_manager
         self._interval     = interval_s
         self._webhook      = webhook_url
+        self._webhook_tasks: set = set()  # 持有引用，防止未完成的 webhook 任务被 GC 回收
         self._detector     = AnomalyDetector()
 
         self._alerts:      List[Alert]      = []
@@ -257,9 +258,9 @@ class PerformanceMonitor:
                 ))
 
         # ── 真实业务/执行维度计数（Task 状态 / Runtime 调用 / Verifier flags）─
-        obs = getattr(self._orchestrator, "observability_counts", lambda: {})()
+        obs = getattr(self._orchestrator, "observability_counts", dict)()
         task_status = obs.get("task_status") or {}
-        runtime_counts = obs.get("runtime") or {}
+        obs.get("runtime") or {}
         verifier_flags = obs.get("verification") or {}
 
         for status, count in task_status.items():
@@ -342,7 +343,9 @@ class PerformanceMonitor:
         logger.warning(f"[{severity.value.upper()}] {alert.message}")
         # 异步发送 Webhook（不阻塞采集循环）
         if self._webhook:
-            asyncio.create_task(self._send_webhook(alert))
+            task = asyncio.create_task(self._send_webhook(alert))
+            self._webhook_tasks.add(task)
+            task.add_done_callback(self._webhook_tasks.discard)
 
     def _generate_profile_suggestions(self, agent_stats: Dict[str, Any]) -> None:
         """
@@ -380,7 +383,7 @@ class PerformanceMonitor:
 
     def summary(self) -> Dict[str, Any]:
         """返回当前监控摘要，供 API 层暴露。"""
-        obs = getattr(self._orchestrator, "observability_counts", lambda: {})()
+        obs = getattr(self._orchestrator, "observability_counts", dict)()
         return {
             "agent_stats":   self._orchestrator.get_stats(),
             "tool_stats":    self._tool_manager.get_stats(),

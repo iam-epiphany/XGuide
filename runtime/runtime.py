@@ -73,7 +73,7 @@ class AgentRuntime:
     def chain(self) -> MiddlewareChain:
         return self._chain
 
-    def register(self, middleware: RuntimeMiddleware) -> "AgentRuntime":
+    def register(self, middleware: RuntimeMiddleware) -> AgentRuntime:
         """注册自定义中间件（追加到链尾）。"""
         self._chain.add(middleware)
         return self

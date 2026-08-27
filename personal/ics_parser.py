@@ -91,7 +91,7 @@ def _parse_datetime_value(value: str, utc_to_local: bool = True) -> datetime:
     match = re.fullmatch(r"(\d{8})(?:T(\d{6}))?(Z)?", value)
     if not match:
         raise ICSError(f"无法解析时间值: {value!r}")
-    d = datetime.strptime(match.group(1), "%Y%m%d")
+    d = datetime.strptime(match.group(1), "%Y%m%d")  # noqa: DTZ007 — ICS 无时区语义，按本地时间解释
     if match.group(2):
         d = d.replace(
             hour=int(match.group(2)[0:2]),
@@ -233,7 +233,7 @@ def _parse_event(
             try:
                 days_of_week = [WEEKDAY_MAP[d.strip().upper()] for d in rule["BYDAY"].split(",")]
             except KeyError:
-                raise ICSError(f"未知 BYDAY: {rule['BYDAY']}")
+                raise ICSError(f"未知 BYDAY: {rule['BYDAY']}") from None
         if rule.get("UNTIL"):
             until = _parse_datetime_value(rule["UNTIL"], utc_to_local=False).date()
         if rule.get("COUNT"):

@@ -112,9 +112,9 @@ def test_jsonl_line_docs():
 
 
 def test_jsonl_skips_blank_lines():
-    data = ('{"title": "A", "content": "x"}\n'
-            '\n'
-            '{"title": "B", "content": "y"}\n').encode()
+    data = (b'{"title": "A", "content": "x"}\n'
+            b'\n'
+            b'{"title": "B", "content": "y"}\n')
     docs = parse_document("清单.jsonl", data)
     assert [d["title"] for d in docs] == ["A", "B"]
 
@@ -179,7 +179,7 @@ def test_docx_empty_raises():
 
 
 def test_csv_to_markdown_table():
-    csv_bytes = "名称,价格\n奶茶,12\n".encode("utf-8")
+    csv_bytes = "名称,价格\n奶茶,12\n".encode()
     docs = parse_document("价目表.csv", csv_bytes)
     assert len(docs) == 1
     text = docs[0]["content"]

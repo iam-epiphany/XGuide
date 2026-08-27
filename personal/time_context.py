@@ -41,7 +41,7 @@ _PERIODS_STANDARD: List[Tuple[str, str, str]] = [
 ]
 # 夏季作息：下午 5-8 节整体后移 30 分钟，晚上 9-10 节后移 30 分钟
 _PERIODS_SUMMER: List[Tuple[str, str, str]] = [
-    *[(n, s, e) for n, s, e in _PERIODS_STANDARD[:4]],
+    *list(_PERIODS_STANDARD[:4]),
     ("第5节", "14:30", "15:15"),
     ("第6节", "15:20", "16:05"),
     ("第7节", "16:25", "17:10"),
@@ -53,7 +53,7 @@ _PERIODS_SUMMER: List[Tuple[str, str, str]] = [
 
 def periods_for(now: Optional[datetime] = None) -> List[Tuple[str, str, str]]:
     """按日期返回适用作息表（夏季 5-9 月用夏季表，其余用标准表）。"""
-    now = now or datetime.now()
+    now = now or datetime.now().astimezone()
     return _PERIODS_SUMMER if now.month in SUMMER_MONTHS else _PERIODS_STANDARD
 
 
@@ -62,7 +62,7 @@ def current_period(now: Optional[datetime] = None) -> Tuple[str, bool]:
     返回 (当前所处节次描述, 是否在上课)。
     上课 → "第5节（14:00-14:45）"；课间/午休/晚上 → "非上课时间（14:45-15:55 课间）"。
     """
-    now = now or datetime.now()
+    now = now or datetime.now().astimezone()
     t = now.time()
     periods = periods_for(now)
 
@@ -73,7 +73,7 @@ def current_period(now: Optional[datetime] = None) -> Tuple[str, bool]:
         if to_t(start) <= t <= to_t(end):
             return f"{name}（{start}-{end}）", True
     # 课间描述：找最近的下一个节次开始时间
-    for name, start, end in periods:
+    for name, start, _end in periods:
         if t < to_t(start):
             return f"非上课时间（下一节 {name} {start} 开始）", False
     return "非上课时间（今日课程已结束）", False
@@ -81,7 +81,7 @@ def current_period(now: Optional[datetime] = None) -> Tuple[str, bool]:
 
 def week_num(now: Optional[datetime] = None) -> int:
     """当前教学周（开学前返回 0）。"""
-    now = now or datetime.now()
+    now = now or datetime.now().astimezone()
     delta = (now.date() - SEMESTER_START).days
     if delta < 0:
         return 0
@@ -92,7 +92,7 @@ def build_time_context(now: Optional[datetime] = None) -> str:
     """
     生成注入 Agent 的时间上下文字块。所有 Agent 的 system prompt 统一拼接。
     """
-    now = now or datetime.now()
+    now = now or datetime.now().astimezone()
     period_desc, in_class = current_period(now)
     wn = week_num(now)
     status = "上课中" if in_class else period_desc

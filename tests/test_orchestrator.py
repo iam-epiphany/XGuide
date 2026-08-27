@@ -116,7 +116,8 @@ def test_planner_rule_generates_dependency_chain():
     assert by_id["t3"].domain == IntentDomain.PERSONAL
     assert by_id["t3"].action == IntentAction.REQUEST
     assert by_id["t3"].depends_on == ["t1", "t2"]            # 依赖前序任务
-    assert by_id["t1"].depends_on == [] and by_id["t2"].depends_on == []
+    assert by_id["t1"].depends_on == []
+    assert by_id["t2"].depends_on == []
     # 任务自包含：message 携带目标与用户请求
     assert "用户请求" in by_id["t1"].message
 
@@ -128,7 +129,8 @@ def test_planner_parallel_for_multi_domain_with_connector():
     plan = _run(orch._planner.plan(req, req.domain, req.action))
     assert plan.mode == "parallel"
     domains = {t.domain for t in plan.tasks}
-    assert IntentDomain.IT_HELP in domains and IntentDomain.ACADEMIC in domains
+    assert IntentDomain.IT_HELP in domains
+    assert IntentDomain.ACADEMIC in domains
     assert all(not t.depends_on for t in plan.tasks)
 
 
@@ -382,7 +384,8 @@ def test_monitor_feedback_marks_fast_unhealthy_end_to_end():
     → 本应走 Fast 的请求被升级 Deep。"""
     orch = _orchestrator()
     stats = orch.get_stats()
-    assert stats and all("profile" in s for s in stats.values())
+    assert stats
+    assert all("profile" in s for s in stats.values())
     # 模拟采集数据：所有 Fast 实例样本足 + 低成功率
     for s in stats.values():
         if s["profile"] == "fast":
@@ -587,7 +590,8 @@ def test_dag_failure_propagates_to_blocked():
     assert shared.status("t2") == "success"
     assert shared.status("t3") == "blocked"
     # 被 BLOCKED 的任务不产生工具调用（calls 只有 t1/t2）
-    assert "personal" in calls and "affairs" in calls
+    assert "personal" in calls
+    assert "affairs" in calls
     # 失败/阻塞结果不注入协作上下文快照（只读取声明的依赖）
     t3 = next(t for t in plan.tasks if t.task_id == "t3")
     snapshot = shared.snapshot_for(t3)
@@ -614,7 +618,8 @@ def test_dag_success_chain_allows_dependent():
     # 依赖任务只读取自己声明的依赖结果（t1/t2）
     t3 = next(t for t in plan.tasks if t.task_id == "t3")
     snapshot = shared.snapshot_for(t3)
-    assert "personal 结果" in snapshot and "affairs 结果" in snapshot
+    assert "personal 结果" in snapshot
+    assert "affairs 结果" in snapshot
 
 
 def test_task_duration_measures_each_task_independently():
@@ -657,7 +662,7 @@ def test_task_execute_span_recorded_per_task():
     orch._execute = fake_execute
     plan = _run(orch._planner.plan(req, req.domain, req.action))
 
-    trace = begin_trace()
+    begin_trace()
     try:
         _run(orch._executor.execute(req, plan.tasks, max_tasks=6))
     finally:
@@ -717,7 +722,8 @@ def test_build_tools_read_only_policy_surface():
         "query_campus_info", "get_weather", "calculate_weighted_score",
         "query_affairs_process", "diagnose_it_issue",
     }
-    assert "add_todo" not in names and "complete_todo" not in names
+    assert "add_todo" not in names
+    assert "complete_todo" not in names
 
 
 def test_build_tools_write_allowed_policy_full_surface():
@@ -919,8 +925,10 @@ def test_build_tools_query_action_readonly():
     agent = orch._agents[ProfileName.FAST]
 
     names = {t["name"] for t in agent._build_tools(_req("看看我的待办", action=IntentAction.QUERY))}
-    assert "query_todo" in names and "query_schedule" in names
-    assert "add_todo" not in names and "complete_todo" not in names
+    assert "query_todo" in names
+    assert "query_schedule" in names
+    assert "add_todo" not in names
+    assert "complete_todo" not in names
 
 
 def test_build_tools_request_action_full_surface():
@@ -931,7 +939,8 @@ def test_build_tools_request_action_full_surface():
 
     names = {t["name"] for t in agent._build_tools(_req("帮我记个待办", action=IntentAction.REQUEST))}
     assert "add_todo" in names
-    assert "query_schedule" in names and "diagnose_it_issue" in names
+    assert "query_schedule" in names
+    assert "diagnose_it_issue" in names
 
 
 def test_build_tools_default_read_only_blocks_writes():
@@ -942,7 +951,8 @@ def test_build_tools_default_read_only_blocks_writes():
 
     names = {t["name"] for t in agent._build_tools(_req("帮我记个待办"))}
     assert "query_schedule" in names
-    assert "add_todo" not in names and "complete_todo" not in names
+    assert "add_todo" not in names
+    assert "complete_todo" not in names
 
 
 def test_build_tools_greeting_feedback_no_tools():
@@ -964,7 +974,8 @@ def test_build_tools_complaint_other_readonly():
     for action in (IntentAction.COMPLAINT, IntentAction.OTHER):
         names = {t["name"] for t in agent._build_tools(_req("不满", action=action))}
         assert "query_todo" in names
-        assert "add_todo" not in names and "complete_todo" not in names
+        assert "add_todo" not in names
+        assert "complete_todo" not in names
 
 
 def test_execute_tool_query_blocks_write_tool():
@@ -1311,7 +1322,8 @@ def test_tasks_from_llm_validates_tools_field():
     tasks = orch._planner._tasks_from_llm([
         {"id": "t1", "domain": "personal", "action": "request", "tools": ["anything"]},
     ], req)
-    assert tasks is not None and tasks[0].allowed_write_tools == ["anything"]
+    assert tasks is not None
+    assert tasks[0].allowed_write_tools == ["anything"]
 
 
 def test_capability_flows_to_task_request():
@@ -1328,7 +1340,8 @@ def test_capability_flows_to_task_request():
     plan = _run(orch._planner.plan(req, req.domain, req.action))
     _run(orch.run_parallel(req, plan))
     by_id = dict(seen)
-    assert by_id["t1"] is None and by_id["t2"] is None  # QUERY 任务不限制
+    assert by_id["t1"] is None
+    assert by_id["t2"] is None
     assert by_id["t3"] == ["add_todo"]                  # REQUEST 任务只给 add_todo
 
 
