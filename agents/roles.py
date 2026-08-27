@@ -246,20 +246,34 @@ class BaseAgent:
                  input_tokens, output_tokens,
                  offloaded_chars, saved_tokens) = await self._call_llm(req, on_event=on_event)
             # 引用是检索链路的执行后置条件，不依赖模型是否自觉把 URL 抄进正文。
-            # v6 升级为 sentence-level citation：剥离模型自觉 [n] → 逐句确定性
-            # 匹配证据（Dice + bge 余弦）→ 支持的句子追加 [i]，来源区按 [i]
-            # 编号列出 —— 引用正确性由执行层保证，不再依赖模型自觉（core/grounding.py）。
+            # v7 升级为 claim-aware hybrid citation（core/grounding.py）：剥离
+            # 模型自觉 [n] → 原子事实拆分 → 事实性过滤 → 全证据候选匹配
+            # （Dice + 批量 bge 余弦 + Hard Consistency Guards）→ 高置信直接
+            # 判定 / 模糊 Claim 批量 Entailment Judge → 支持的 Claim 追加 [i]，
+            # 来源区按 [i] 编号列出 —— 引用正确性由执行层保证，不再依赖模型自觉。
             if tool_evidence:
-                from core.grounding import annotate_citations, build_source_section
+                from core.grounding import (
+                    LLMEntailmentJudge,
+                    annotate_citations,
+                    build_source_section,
+                )
 
-                annotated = await annotate_citations(content, tool_evidence)
+                # 模糊区间 Claim 的轻量蕴含判定（ECHOGUIDE_GROUNDING_ENTAILMENT=1
+                # 启用；默认关闭时 Judge fail-open，模糊 Claim 按 insufficient 兜底）
+                judge = LLMEntailmentJudge(
+                    client=self._client, model=self._model, gateway=self._gateway(),
+                )
+                async with span("grounding", n_evidence=len(tool_evidence)):
+                    annotated = await annotate_citations(
+                        content, tool_evidence, entailment_judge=judge,
+                    )
                 content = annotated["text"]
                 sources = build_source_section(tool_evidence, annotated["citation_indices"])
                 if sources:
                     content = f"{content.rstrip()}\n{sources}"
                 if annotated["unsupported_sentences"]:
                     logger.info(
-                        f"TaskAgent({tag}) {len(annotated['unsupported_sentences'])} 句无证据支持，未加引用"
+                        f"TaskAgent({tag}) {len(annotated['unsupported_sentences'])} 个事实 Claim 无证据支持，未加引用"
                     )
             else:
                 # 无证据时剥掉模型自标的 [n]：没有来源区的裸引用是噪声

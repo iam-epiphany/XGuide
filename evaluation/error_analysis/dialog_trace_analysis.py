@@ -3,8 +3,10 @@
 方法（计划 §5.1，先 Trace 后改代码）：
   1. 跑对话用例的 Agent 生成（与 run_dialog_eval 同一 Orchestrator，跳过 Judge
      评分以省成本），记录每轮：question / answer / tool_evidence（真实使用的证据）。
-  2. 把回答按句拆分，逐句与每个证据 chunk 做确定性匹配
-     （字符 2-gram Dice 系数 + bge 向量余弦），得到句子级证据支持度。
+  2. 用 core.grounding.grounding_trace 对回答做 claim-level 证据匹配
+     （原子事实拆分 → 事实性过滤 → 全候选 Dice+bge 组合分 → Hard Guards →
+     高置信直接判定；模糊区间无 Judge 时按 insufficient 兜底），得到逐 Claim
+     的证据支持度、决策来源与最终状态（与生产链路同一套判定逻辑）。
   3. 解析回答中已有的 [n] 引用（模型自标引用）。
   4. 输出分类统计：
      情况 A：答案正确但无引用 → citation pipeline 问题
@@ -34,54 +36,6 @@ load_dotenv()
 
 from evaluation.cases import load_dialog_cases
 
-# 句子级支持度阈值：低于该 Dice 系数视为"该句没有直接证据支持"
-_SUPPORT_DICE = 0.18
-# 证据匹配也看向量相似度（证据内容被截断 800 字，字符重叠可能失真）
-_SUPPORT_COS = 0.55
-
-
-def split_sentences(text: str) -> list[str]:
-    """中文/英文混合句子拆分：按句末标点与换行切分，标点保留在句尾。"""
-    if not text:
-        return []
-    parts = re.split(r"(?<=[。！？!?；;\n])", text)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def _chars(text: str) -> list[str]:
-    return [ch for ch in text if not ch.isspace()]
-
-
-def dice_coef(a: str, b: str) -> float:
-    """字符 2-gram Dice 系数：句子与证据的词汇重叠度（确定性，无外部依赖）。"""
-    def bigrams(s: str) -> set:
-        s = re.sub(r"[\s，。！？、,.!?：:；;\"'“”‘’（）()\[\]【】]", "", s)
-        return {s[i:i + 2] for i in range(len(s) - 1)} if len(s) > 1 else {s}
-    ga, gb = bigrams(a), bigrams(b)
-    if not ga or not gb:
-        return 0.0
-    return 2.0 * len(ga & gb) / (len(ga) + len(gb))
-
-
-async def _embed_sim(sentence: str, chunk: str) -> float:
-    """句子与证据的向量相似度（bge 同构嵌入，失败返回 0）。"""
-    try:
-        from mcp.embeddings import get_embedder
-
-        embedder = get_embedder()
-        if embedder is None:
-            return 0.0
-        import asyncio as _a
-
-        vecs = await _a.to_thread(embedder.embed_documents, [sentence, chunk[:500]])
-        a, b = vecs[0], vecs[1]
-        dot = sum(float(x) * float(y) for x, y in zip(a, b))
-        na = sum(float(x) * float(x) for x in a) ** 0.5
-        nb = sum(float(x) * float(x) for x in b) ** 0.5
-        return float(dot / (na * nb)) if na and nb else 0.0
-    except Exception:
-        return 0.0
-
 
 def extract_citations(answer: str) -> list[int]:
     """解析回答中的 [n] 引用（剔除 Markdown 链接标签）。"""
@@ -89,20 +43,27 @@ def extract_citations(answer: str) -> list[int]:
     return sorted({int(m) for m in re.findall(r"\[(\d+)\]", stripped)})
 
 
-async def analyze_sentence(sentence: str, evidences: list[dict]) -> dict:
-    """单句证据匹配：返回 best evidence、Dice、cos、supported。"""
-    best = {"dice": 0.0, "cos": 0.0, "idx": -1, "title": "", "supported": False}
-    for i, ev in enumerate(evidences):
-        chunk = str(ev.get("content") or "")
-        dice = dice_coef(sentence, chunk)
-        if dice > best["dice"]:
-            best["dice"] = dice
-            best["idx"] = i
-            best["title"] = str(ev.get("title") or "")
-    if best["idx"] >= 0:
-        best["cos"] = await _embed_sim(sentence, str(evidences[best["idx"]].get("content") or ""))
-    best["supported"] = best["dice"] >= _SUPPORT_DICE or best["cos"] >= _SUPPORT_COS
-    return best
+async def analyze_answer(answer: str, evidences: list[dict]) -> list[dict]:
+    """用生产链路（core.grounding）对回答做 claim-level 证据匹配。"""
+    from core.grounding import grounding_trace
+
+    trace = await grounding_trace(answer, evidences)
+    analyzed = []
+    for claim in trace["claims"]:
+        analyzed.append({
+            "sentence": claim["claim"],
+            "evidence_idx": claim["selected_evidence_idx"],
+            "evidence_title": claim["selected_title"],
+            "dice": claim["best_dice"],
+            "cos": claim["best_cos"],
+            "supported": claim["status"] == "supported",
+            "status": claim["status"],
+            "decision_source": claim["decision_source"],
+            "factual": claim["factual"],
+            "guard_reasons": claim["hard_guard"]["reasons"],
+            "citation": claim["citation"],
+        })
+    return analyzed
 
 
 async def run_trace(cases, smoke: bool) -> list[dict]:
@@ -133,18 +94,7 @@ async def run_trace(cases, smoke: bool) -> list[dict]:
             history.append({"role": "user", "content": question})
             history.append({"role": "assistant", "content": answer})
 
-            sentences = [s for s in split_sentences(answer)]
-            analyzed = []
-            for s in sentences:
-                match = await analyze_sentence(s, evidences)
-                analyzed.append({
-                    "sentence": s,
-                    "evidence_idx": match["idx"],
-                    "evidence_title": match["title"],
-                    "dice": round(match["dice"], 4),
-                    "cos": round(match["cos"], 4),
-                    "supported": match["supported"],
-                })
+            analyzed = await analyze_answer(answer, evidences)
             citations = extract_citations(answer)
             n_sources = len(evidences)
             turns_trace.append({
@@ -157,8 +107,8 @@ async def run_trace(cases, smoke: bool) -> list[dict]:
                 "citations_in_answer": citations,
                 "citation_valid": all(1 <= c <= n_sources for c in citations),
                 "has_citation": len(citations) > 0,
-                "sentences": analyzed,
-                "supported_sentence_ratio": round(
+                "claims": analyzed,
+                "supported_claim_ratio": round(
                     sum(1 for a in analyzed if a["supported"]) / len(analyzed), 4
                 ) if analyzed else 0.0,
             })
@@ -169,6 +119,12 @@ async def run_trace(cases, smoke: bool) -> list[dict]:
     return turns_trace
 
 
+def _reason_kind(reason: str) -> str:
+    """从 [kind] 前缀提取 Guard reason 分类（无前缀归 other）。"""
+    m = re.match(r"\[([a-z_]+)\]", reason or "")
+    return m.group(1) if m else "other"
+
+
 def summarize(turns_trace: list[dict]) -> dict:
     n = len(turns_trace)
     has_ev = [t for t in turns_trace if t["n_sources"] > 0]
@@ -176,8 +132,15 @@ def summarize(turns_trace: list[dict]) -> dict:
     cited = [t for t in turns_trace if t["has_citation"]]
     valid_cited = [t for t in cited if t["citation_valid"]]
     unsupported_sents = [
-        (t, a) for t in turns_trace for a in t["sentences"] if not a["supported"]
+        (t, a) for t in turns_trace for a in t["claims"] if not a["supported"]
     ]
+    # Hard/Soft Guard 命中分类统计：定位哪种冲突在真实对话中最常见
+    reason_kinds: dict[str, int] = {}
+    for t in turns_trace:
+        for a in t["claims"]:
+            for r in a.get("guard_reasons", []):
+                kind = _reason_kind(r)
+                reason_kinds[kind] = reason_kinds.get(kind, 0) + 1
     return {
         "total_turns": n,
         "turns_with_evidence": len(has_ev),
@@ -186,14 +149,16 @@ def summarize(turns_trace: list[dict]) -> dict:
         "citation_rate": round(len(cited) / n, 4) if n else 0.0,
         "turns_with_valid_citation": len(valid_cited),
         "citation_correctness": round(len(valid_cited) / len(cited), 4) if cited else None,
-        "avg_supported_sentence_ratio": round(
-            statistics.mean(t["supported_sentence_ratio"] for t in has_ev), 4
+        "avg_supported_claim_ratio": round(
+            statistics.mean(t["supported_claim_ratio"] for t in has_ev), 4
         ) if has_ev else None,
-        "unsupported_sentence_count": len(unsupported_sents),
+        "unsupported_claim_count": len(unsupported_sents),
+        "guard_reason_kinds": dict(sorted(reason_kinds.items(), key=lambda kv: -kv[1])),
         "unsupported_examples": [
             {"case_id": t["case_id"], "turn": t["turn"], "sentence": a["sentence"],
              "dice": a["dice"], "cos": a["cos"], "evidence_title": a["evidence_title"],
-             "question": t["question"]}
+             "status": a["status"], "decision_source": a["decision_source"],
+             "guard_reasons": a["guard_reasons"], "question": t["question"]}
             for t, a in unsupported_sents[:15]
         ],
         "no_evidence_turns": [

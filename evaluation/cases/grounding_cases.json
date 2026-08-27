@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "description": "Grounding claim-level 评测集：supported / unsupported（含 contradicted）/ skipped。expected 用于 Precision/Recall/F1（positive = supported）；expected_status 为可选严格状态校验（supported|contradicted|insufficient|skipped）；expected_evidence 为期望引用的证据编号（1-based，可选）。",
+  "cases": [
+    {"id": "g-001", "claim": "补办校园卡需携带本人身份证", "evidences": [{"title": "校园卡补办指南", "content": "补办校园卡需携带本人身份证原件及复印件。"}], "expected": "supported", "note": "直接引用"},
+    {"id": "g-002", "claim": "校园卡补办时需带上身份证件", "evidences": [{"title": "校园卡补办指南", "content": "补办校园卡需携带本人身份证。"}], "expected": "supported", "note": "同义改写"},
+    {"id": "g-003", "claim": "行政楼周日开放", "evidences": [{"title": "行政楼开放通知", "content": "行政楼周日不开放，开放时间为周一至周五。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "否定关系（词面高度相似）"},
+    {"id": "g-004", "claim": "校园卡补办费用为 200 元", "evidences": [{"title": "校园卡补办指南", "content": "校园卡补办费用为 20 元。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "数字错误（金额）"},
+    {"id": "g-005", "claim": "图书馆 5 月 5 日闭馆", "evidences": [{"title": "图书馆通知", "content": "图书馆 5 月 1 日至 5 月 3 日闭馆。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "日期错误（不在闭馆区间）"},
+    {"id": "g-006", "claim": "图书馆 5 月 2 日闭馆", "evidences": [{"title": "图书馆通知", "content": "图书馆 5 月 1 日至 5 月 3 日闭馆。"}], "expected": "supported", "note": "日期在闭馆区间内"},
+    {"id": "g-007", "claim": "教务处办公时间为 9:00-18:00", "evidences": [{"title": "教务处公告", "content": "教务处办公时间为 9:00-17:00。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "时间错误（区间端点不同）"},
+    {"id": "g-008", "claim": "教务处 10:00 可办理业务", "evidences": [{"title": "教务处公告", "content": "教务处办公时间为 9:00-17:00。"}], "expected": "supported", "note": "时间在办公区间内"},
+    {"id": "g-009", "claim": "校园卡服务厅周六开放", "evidences": [{"title": "服务厅公告", "content": "校园卡服务厅周日开放，周六休息。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "星期作用域内反义冲突"},
+    {"id": "g-010", "claim": "使用自习室需要预约", "evidences": [{"title": "自习室管理说明", "content": "使用自习室无需预约，先到先得。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "否定关系（需要 vs 无需）"},
+    {"id": "g-011", "claim": "校园卡补办费用 20 元", "evidences": [{"title": "旧通知", "content": "校园卡补办费用为 200 元。"}, {"title": "最新通知", "content": "校园卡补办费用为 20 元。"}], "expected": "supported", "expected_evidence": 2, "note": "多候选：词面更近的旧通知被 Hard Guard 拦截，引用最新通知"},
+    {"id": "g-012", "claim": "校园卡补办免费", "evidences": [{"title": "校园卡补办指南", "content": "校园卡补办收费 20 元。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "免费 vs 收费"},
+    {"id": "g-013", "claim": "转专业通过率约 90%", "evidences": [{"title": "转专业说明", "content": "转专业通过率为 95%。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "百分比错误"},
+    {"id": "g-014", "claim": "补办费用 20 元", "evidences": [{"title": "校园卡补办指南", "content": "补办费用 20 元，押金 200 元。"}], "expected": "supported", "note": "数值子集（20 在证据中出现）"},
+    {"id": "g-015", "claim": "行政楼周一至周五开放", "evidences": [{"title": "行政楼开放通知", "content": "行政楼开放时间为周一至周五。"}], "expected": "supported", "note": "星期范围一致"},
+    {"id": "g-016", "claim": "如果需要我可以继续查询", "evidences": [{"title": "任意", "content": "补办校园卡需携带本人身份证。"}], "expected": "skip", "note": "非事实句（交互语）"},
+    {"id": "g-017", "claim": "建议提前确认最新通知", "evidences": [{"title": "任意", "content": "补办校园卡需携带本人身份证。"}], "expected": "skip", "note": "建议语"},
+    {"id": "g-018", "claim": "补办校园卡需携带本人身份证", "evidences": [{"title": "校园卡补办指南", "content": "补办校园卡需携带本人身份证。"}], "expected": "supported", "note": "逐字引用"},
+    {"id": "g-019", "claim": "图书馆每晚 22:00 闭馆", "evidences": [{"title": "图书馆公告", "content": "图书馆每日 21:30 闭馆。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "时间点错误"},
+    {"id": "g-020", "claim": "本学期选课在 9 月进行", "evidences": [{"title": "选课通知", "content": "本学期选课时间为 9 月至 10 月。"}], "expected": "supported", "note": "月份子集"},
+    {"id": "g-021", "claim": "校园卡丢失后无法补办", "evidences": [{"title": "校园卡补办指南", "content": "校园卡丢失后可在师生服务大厅补办。"}], "expected": "unsupported", "expected_status": "contradicted", "note": "无法 vs 可补办"}
+  ]
+}
