@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -363,7 +364,18 @@ async def chat_stream(req: ChatRequest, request: Request = None):
 
         yield "data: " + json.dumps({"type": "hello", "conv_id": conv_id}, ensure_ascii=False) + "\n\n"
         while True:
-            ev = await queue.get()
+            # 客户端断开即取消编排任务：不再烧模型调用、不写记忆（防僵尸任务）。
+            # request=None 保留离线单测路径（无真实连接，跳过断开检测）。
+            if request is not None and await request.is_disconnected():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                logger.info("SSE 客户端断开，已取消编排任务 conv=%s", conv_id)
+                return
+            try:
+                ev = await asyncio.wait_for(queue.get(), timeout=0.5)
+            except TimeoutError:
+                continue  # 事件静默期周期性回到断开检测
             yield "data: " + json.dumps(ev, ensure_ascii=False) + "\n\n"
             if ev.get("type") in ("done", "error"):
                 break

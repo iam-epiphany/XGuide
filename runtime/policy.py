@@ -27,6 +27,13 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "").strip())
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class ExecutionPolicy:
     """执行预算与策略（默认值与原魔法数字一一对应）。"""
@@ -39,6 +46,7 @@ class ExecutionPolicy:
     max_model_calls: int = 0             # 单请求真实模型调用次数上限（0 = 仅计数不强限）
     max_tool_calls: int = 0              # 单请求工具调用总次数上限（0 = 仅计数不强限）
     max_retries: int = 1                 # 失败降级次数上限（Fast→Deep）
+    request_timeout_s: float = 120.0     # 单请求全局 deadline（0 = 不设超时）
     synth_max_tokens: int = 1024         # 协作合成器输出预算（原硬编码 1024）
     guard_enabled: bool = True           # Runtime 层 Guard（CLI/内部调用同样受保护）
     guard_max_message_chars: int = 2000  # 单条消息长度上限（与 HTTP 层 GuardSettings 对齐）
@@ -56,6 +64,7 @@ class ExecutionPolicy:
             max_model_calls=_int_env("ECHOGUIDE_RUNTIME_MAX_MODEL_CALLS", 0),
             max_tool_calls=_int_env("ECHOGUIDE_RUNTIME_MAX_TOOL_CALLS", 0),
             max_retries=_int_env("ECHOGUIDE_RUNTIME_MAX_RETRIES", 1),
+            request_timeout_s=_float_env("ECHOGUIDE_RUNTIME_REQUEST_TIMEOUT_S", 120.0),
             synth_max_tokens=_int_env("ECHOGUIDE_RUNTIME_SYNTH_MAX_TOKENS", 1024),
             guard_enabled=_bool_env("ECHOGUIDE_RUNTIME_GUARD_ENABLED", True),
             guard_max_message_chars=_int_env(

@@ -193,3 +193,89 @@ def test_personal_domain_cache_hit_is_discarded():
     assert events[-1]["type"] == "done"
     assert events[-1].get("cached", False) is False
     assert "课表" not in events[-1]["response"]
+
+
+# ── SSE 客户端断开取消（防僵尸任务）────────────────────────────────────────────
+
+class _DisconnectedRequest:
+    """
+    模拟 SSE 客户端：is_disconnected 按给定序列返回（默认先连后断）。
+
+    首查必须返回 False —— 让队列等待周期（0.5s）先把后台编排任务调度起来，
+    再触发断开取消，否则取消落在任务启动前（编排器内部从未执行，测不到级联）。
+    """
+
+    def __init__(self, sequence=(False, True)):
+        self._sequence = list(sequence)
+        self._calls = 0
+        self.headers = {}  # _benchmark_strategy 短路路径需要
+
+    async def is_disconnected(self) -> bool:
+        if self._calls >= len(self._sequence):
+            return self._sequence[-1]
+        value = self._sequence[self._calls]
+        self._calls += 1
+        return value
+
+
+def test_chat_stream_client_disconnect_cancels_task(monkeypatch):
+    """
+    SSE 客户端断开 → 编排任务被取消（CancelledError 级联），且不写入记忆。
+    回归场景：用户关页/断网后，服务端任务继续跑完 LLM + 写记忆（烧 token 污染数据）。
+    """
+    cancelled: dict = {"hit": False}
+    writes: list = []
+
+    class _SlowOrchestrator:
+        async def run(self, req, on_event=None):
+            try:
+                await asyncio.sleep(30)  # 模拟长耗时编排
+            except asyncio.CancelledError:
+                cancelled["hit"] = True
+                raise
+
+    class _Mem(_FakeMemory):
+        async def add_message(self, *args, **kwargs):
+            writes.append(args)
+
+    state._orchestrator = _SlowOrchestrator()
+    state._memory = _Mem()
+    state._semantic_cache = _FakeCache()
+    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: None)
+
+    req = m.ChatRequest(message="南校区食堂几点关门？", user_id="u1")
+    resp = asyncio.run(m.chat_stream(req, request=_DisconnectedRequest()))
+    events = _parse_sse(_collect(resp))
+
+    # 只发出 hello 即中断（不等待编排结果，也不产出 done）
+    assert [e["type"] for e in events] == ["hello"]
+    assert cancelled["hit"] is True  # 编排任务确实被取消
+    assert writes == []  # 中断不写记忆
+
+
+def test_chat_stream_disconnect_polled_during_silent_period(monkeypatch):
+    """
+    编排长时间不产生事件（队列静默）时，断开检测仍周期性生效：
+    不能在 queue.get() 上无限阻塞 —— 否则断开后任务继续跑。
+    """
+    cancelled: dict = {"hit": False}
+
+    class _SilentOrchestrator:
+        async def run(self, req, on_event=None):
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cancelled["hit"] = True
+                raise
+
+    state._orchestrator = _SilentOrchestrator()
+    state._memory = _FakeMemory()
+    state._semantic_cache = _FakeCache()
+    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: None)
+
+    req = m.ChatRequest(message="南校区食堂几点关门？", user_id="u1")
+    resp = asyncio.run(m.chat_stream(req, request=_DisconnectedRequest()))
+    events = _parse_sse(_collect(resp))
+
+    assert [e["type"] for e in events] == ["hello"]
+    assert cancelled["hit"] is True

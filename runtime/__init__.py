@@ -15,6 +15,7 @@ from runtime.middleware import (
     BudgetExceeded,
     GuardRejection,
     MiddlewareChain,
+    RequestTimeoutError,
     RuntimeMiddleware,
 )
 from runtime.policy import ExecutionPolicy
@@ -27,6 +28,7 @@ __all__ = [
     "ExecutionPolicy",
     "GuardRejection",
     "MiddlewareChain",
+    "RequestTimeoutError",
     "RunContext",
     "RunState",
     "RuntimeMiddleware",

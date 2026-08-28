@@ -33,6 +33,18 @@ class BudgetExceeded(Exception):  # noqa: N818 — 对外导出 API 命名
         self.reason = reason
 
 
+class RequestTimeoutError(Exception):
+    """请求级全局超时（deadline）：core 超过时限被强制取消。
+
+    与 Guard/Budget 同级：不重试、直接收口为用户可见兜底文案。
+    """
+
+    def __init__(self, timeout_s: float):
+        self.timeout_s = timeout_s
+        self.reason = f"请求处理超时（超过 {timeout_s:g} 秒），已自动终止"
+        super().__init__(self.reason)
+
+
 class RuntimeMiddleware:
     """中间件基类：默认全部钩子为 no-op，子类按需覆盖。"""
 

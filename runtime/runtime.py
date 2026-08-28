@@ -16,6 +16,7 @@ after_run 恒执行一次，保证观测闭环不因拦截而中断。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -24,6 +25,7 @@ from runtime.middleware import (
     BudgetExceeded,
     GuardRejection,
     MiddlewareChain,
+    RequestTimeoutError,
     RuntimeMiddleware,
 )
 from runtime.policy import ExecutionPolicy
@@ -103,6 +105,10 @@ class AgentRuntime:
 
         拦截（Guard/Budget）：core 不执行，state.meta["reject_message"] 记录原因，
         返回 None；其他异常记录到 state.errors 后向上抛出；after_run 恒执行一次。
+
+        deadline（policy.request_timeout_s > 0 时）：core 整体受全局超时约束，
+        超时即取消编排任务（CancelledError 级联进 core 内的所有 await），以
+        RequestTimeoutError 走同一拦截收口 —— 保证任何下游卡死都不会拖死请求。
         """
         ctx = self.ctx_for(state, on_event=on_event, services=services)
 
@@ -115,13 +121,23 @@ class AgentRuntime:
             from core.tracing import span
 
             async with span("runtime_run", request_id=state.request_id):
-                result = await core(ctx)
+                if self.policy.request_timeout_s > 0:
+                    result = await asyncio.wait_for(
+                        core(ctx), timeout=self.policy.request_timeout_s
+                    )
+                else:
+                    result = await core(ctx)
             await self._chain.before_finish(ctx)
             await self._chain.after_finish(ctx, result)
             return result
         except (GuardRejection, BudgetExceeded) as ex:
             await self._chain.after_finish(ctx, None)
             return self._reject(state, ex)
+        except TimeoutError:
+            await self._chain.after_finish(ctx, None)
+            return self._reject(
+                state, RequestTimeoutError(self.policy.request_timeout_s)
+            )
         except Exception as ex:
             state.add_error(f"run: {ex}")
             logger.error(f"runtime run 失败: {ex}")
@@ -132,7 +148,12 @@ class AgentRuntime:
     @staticmethod
     def _reject(state: RunState, ex: Exception) -> None:
         reason = getattr(ex, "reason", str(ex))
-        state.add_error(f"guard: {reason}")
+        tag = {
+            "GuardRejection": "guard",
+            "BudgetExceeded": "budget",
+            "RequestTimeoutError": "timeout",
+        }.get(type(ex).__name__, "reject")
+        state.add_error(f"{tag}: {reason}")
         state.meta["reject_message"] = reason
         logger.warning(f"runtime 拦截请求: {reason}")
         return None
