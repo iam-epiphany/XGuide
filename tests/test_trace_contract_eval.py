@@ -116,6 +116,31 @@ def test_decision_trace_contains_intent_plan_profile_tasks_and_verification():
     assert record["decision_trace"]["tasks"]["tasks"][0]["id"] == "t0"
 
 
+def test_parallel_decision_trace_uses_final_task_execution_snapshot():
+    orchestrator = AgentOrchestrator(api_key="sk-test-not-used")
+
+    async def fake_execute(task_req, on_event=None):
+        return AgentResponse(content=f"{task_req.task_id} ok", success=True, profile="deep")
+
+    async def fake_synthesize(req, results):
+        return "combined"
+
+    orchestrator._execute = fake_execute
+    orchestrator._synthesizer.synthesize = fake_synthesize
+    begin_trace("parallel-decision-test")
+    req = Request(
+        message="食堂几点关门，顺便查下明天课表", user_id="u", conv_id="c",
+        domain=IntentDomain.CAMPUS_LIFE, action=IntentAction.QUERY,
+    )
+    result = _run(orchestrator.run(req))
+    record = end_trace().to_dict()
+
+    assert result.execution["mode"] == "parallel"
+    task_snapshot = record["decision_trace"]["tasks"]["tasks"]
+    assert {task["status"] for task in task_snapshot} == {"success"}
+    assert all("contract_verification" in task for task in task_snapshot)
+
+
 def test_profile_decision_records_monitor_upgrade():
     orchestrator = AgentOrchestrator(api_key="sk-test-not-used")
     orchestrator.set_fast_health(False)

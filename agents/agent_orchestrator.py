@@ -573,6 +573,9 @@ class AgentOrchestrator:
         )
         execution["verification"] = verification
         if req.state is not None:
+            # 与单任务路径一致：写入执行完成后的最终 Task 快照（含 DAG 状态、
+            # 工具、Contract 与确定性验收结果），避免 Decision Trace 只停留在规划阶段。
+            req.state.record_decision("tasks", tasks=execution["tasks"])
             req.state.record_decision("verification", **verification)
             execution["runtime"] = req.state.summary()
             execution["decision_trace"] = dict(req.state.decision_trace)
