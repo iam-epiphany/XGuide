@@ -36,6 +36,7 @@ import inspect
 import json
 import logging
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from anthropic import AsyncAnthropic
@@ -703,6 +704,7 @@ class BaseAgent:
             if runtime is not None and req.state is not None:
                 await runtime.fire_tool_before(req.state, name, params)
             data, error = None, None
+            started = time.monotonic()
             if self._skill_manager is None:
                 error = "技能管理器不可用"
             else:
@@ -723,6 +725,16 @@ class BaseAgent:
                         data = self._skill_manager.load_skill_resource(skill_name, relative_path)
             if runtime is not None and req.state is not None:
                 await runtime.fire_tool_after(req.state, name, data, error)
+            self._record_tool_trace(
+                req,
+                name,
+                SimpleNamespace(
+                    success=error is None, data=data, error=error,
+                    latency_ms=(time.monotonic() - started) * 1000,
+                    cached=False, reranked=False, fallback_used=False,
+                ),
+                (time.monotonic() - started) * 1000,
+            )
             if error:
                 return None, error
             return data, None
@@ -760,6 +772,7 @@ class BaseAgent:
         if runtime is not None and req.state is not None:
             await runtime.fire_tool_before(req.state, name, params)
         result = None
+        started = time.monotonic()
         try:
             async with span("tool_call", tool=name, query=str(params.get("query", ""))[:80]):
                 result = await self._tool_manager.call(
@@ -780,9 +793,36 @@ class BaseAgent:
                     result.data if result is not None and result.success else None,
                     result.error if result is not None and not result.success else None,
                 )
+            self._record_tool_trace(req, name, result, (time.monotonic() - started) * 1000)
         if not result.success:
             return None, result.error or "工具执行失败"
         return result.data, None
+
+    @staticmethod
+    def _record_tool_trace(req: Any, name: str, result: Any, elapsed_ms: float) -> None:
+        """把 ToolManager 的结构化结果收口到请求 RunState/Trace。"""
+        state = getattr(req, "state", None)
+        if state is None:
+            return
+        data = getattr(result, "data", None)
+        result_count = len(data) if isinstance(data, list | tuple | set | dict) else int(data is not None)
+        evidence_count = sum(
+            1 for item in data
+            if isinstance(item, dict) and (item.get("title") or item.get("source_url") or item.get("content"))
+        ) if isinstance(data, list) else 0
+        state.record_tool_call(
+            tool_name=name,
+            task_id=str(getattr(req, "task_id", "")),
+            tool_round=state.tool_round_count + 1,
+            success=bool(result is not None and getattr(result, "success", False)),
+            error=getattr(result, "error", None) if result is not None else "工具调用未返回结果",
+            latency_ms=float(getattr(result, "latency_ms", 0.0) or elapsed_ms),
+            cache_hit=bool(getattr(result, "cached", False)),
+            reranked=bool(getattr(result, "reranked", False)),
+            fallback_used=bool(getattr(result, "fallback_used", False)),
+            result_count=result_count,
+            evidence_count=evidence_count,
+        )
 
     async def _auto_retrieve(self, req: Any) -> Tuple[str, List[Dict[str, Any]]]:
         """Harness 预检索：知识类请求注入一次确定性检索证据（retrieval-first）。
@@ -806,20 +846,35 @@ class BaseAgent:
                     query = f"{m['content']} {query}"
                     break
         params = {"query": query, "top_k": self.profile.rag_top_k}
+        runtime = getattr(self, "_runtime", None)
+        started = time.monotonic()
+        result = None
+        if runtime is not None and getattr(req, "state", None) is not None:
+            await runtime.fire_tool_before(req.state, name, params)
         try:
-            result = await self._tool_manager.call(
-                name,
-                params,
-                context={
-                    "agent_type": req.domain.value if req.domain is not None else "task_agent",
-                    "user_id": getattr(req, "user_id", ""),
-                },
-                rerank_top_k=self.profile.rag_top_k if self.profile.use_rerank else 0,
-                use_rewrite=self.profile.use_rewrite,
-            )
+            from core.tracing import span
+            async with span("tool_call", tool=name, auto_retrieve=True):
+                result = await self._tool_manager.call(
+                    name,
+                    params,
+                    context={
+                        "agent_type": req.domain.value if req.domain is not None else "task_agent",
+                        "user_id": getattr(req, "user_id", ""),
+                    },
+                    rerank_top_k=self.profile.rag_top_k if self.profile.use_rerank else 0,
+                    use_rewrite=self.profile.use_rewrite,
+                )
         except Exception as ex:
             logger.warning(f"预检索失败: {ex}")
             return "", []
+        finally:
+            if runtime is not None and getattr(req, "state", None) is not None:
+                await runtime.fire_tool_after(
+                    req.state, name,
+                    result.data if result is not None and result.success else None,
+                    result.error if result is not None and not result.success else None,
+                )
+            self._record_tool_trace(req, name, result, (time.monotonic() - started) * 1000)
         if not result.success or not isinstance(result.data, list):
             return "", []
         items = result.data[: self.profile.rag_top_k]

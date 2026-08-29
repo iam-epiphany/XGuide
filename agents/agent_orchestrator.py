@@ -61,6 +61,7 @@ from agents.workflow import (
     Task,
     TaskExecutor,
     TaskPlanner,
+    verify_task_contract,
 )
 from core.domains import IntentAction, IntentDomain
 from core.intent_recognizer import IntentCategory, IntentRecognizer
@@ -99,6 +100,7 @@ class Request:
     profile_policy: str = ""                  # 复杂度/置信度策略原始选择（不含 Monitor 故障转移）
     complexity_mode: str = "single"          # 由 Planner 产出的 ExecutionPlan.mode 回填
     complexity_reason: str = "单领域请求"
+    planning_strategy: str = ""              # fast_path / llm / benchmark_single_agent
     benchmark_strategy: str = "adaptive"
     state: Optional[RunState] = None   # Runtime 运行状态（编排器 run() 创建后回填）
     state_query: Optional[Dict[str, Any]] = None  # 查询理解产出（needs_knowledge，Verifier 消费）
@@ -385,6 +387,16 @@ class AgentOrchestrator:
                         "needs_knowledge": intent_result.needs_knowledge,
                     })
 
+        if req.state is not None:
+            req.state.record_decision(
+                "intent",
+                domain=req.domain.value if req.domain else "other",
+                action=req.action.value if req.action else "other",
+                confidence=req.confidence,
+                classifier_stage=req.classifier_stage,
+                needs_knowledge=bool((req.state_query or {}).get("needs_knowledge")),
+            )
+
         # 2. Planner：统一输出 ExecutionPlan（Task DAG）；mode 由 DAG 自动推导
         # 知识类请求：Harness 预检索注入证据（retrieval-first）——不依赖模型
         # 自觉调用 knowledge_search（实测大多靠参数记忆作答，无证据可引用）
@@ -393,17 +405,38 @@ class AgentOrchestrator:
         # Benchmark 单 Agent 基线：强制压回单任务（只影响执行形态，不影响意图）
         if req.benchmark_strategy == "single_agent" and plan.mode != "single":
             single_task = plan.tasks[0]
-            plan = ExecutionPlan([single_task], reason="Benchmark 单 Agent 基线")
+            plan = ExecutionPlan([single_task], reason="Benchmark 单 Agent 基线", strategy="benchmark_single_agent")
         req.complexity_mode = plan.mode
         req.complexity_reason = plan.reason
-        req.profile = (
-            ProfileName.DEEP
-            if "always_deep" in req.benchmark_strategy
-            else self._select_profile(req, plan.mode)
-        )
+        req.planning_strategy = plan.strategy
+        if "always_deep" in req.benchmark_strategy:
+            req.profile = ProfileName.DEEP
+            if req.state is not None:
+                req.state.record_decision(
+                    "profile",
+                    policy_selected="deep",
+                    selected="deep",
+                    mode=plan.mode,
+                    monitor_fast_unhealthy=self._fast_unhealthy,
+                    monitor_upgraded=False,
+                    reason="benchmark 策略强制 Deep",
+                )
+        else:
+            req.profile = self._select_profile(req, plan.mode)
         if req.state is not None:
             req.state.complexity_mode = plan.mode
             req.state.profile = req.profile.value if req.profile else ""
+            req.state.record_decision(
+                "planning",
+                strategy=plan.strategy,
+                reason=plan.reason,
+                mode=plan.mode,
+                tasks=[{
+                    "task_id": task.task_id, "domain": task.domain.value,
+                    "action": task.action.value, "depends_on": list(task.depends_on),
+                    "contract": task.contract(),
+                } for task in plan.tasks],
+            )
         if on_event is not None:
             await on_event({
                 "type": "meta",
@@ -422,15 +455,22 @@ class AgentOrchestrator:
             return await self.run_parallel(req, plan, on_event)
 
         # 4. 出口校验（Grounding）：规则全量 + 可选 LLM 判定；只标注不阻断
-        verification = await self._verify(req, response)
+        task_meta = self._single_task_meta(task, response)
+        verification = await self._verify(req, response, task_contracts=[task_meta])
 
         execution = self._execution_meta(
             req,
             mode="single",
             agents=agents,
             responses=[response],
+            tasks=[task_meta],
         )
         execution["verification"] = verification
+        if req.state is not None:
+            req.state.record_decision("tasks", tasks=execution["tasks"])
+            req.state.record_decision("verification", **verification)
+            execution["runtime"] = req.state.summary()
+            execution["decision_trace"] = dict(req.state.decision_trace)
         return OrchestratorResult(
             request_id=req.request_id,
             response=response.content,
@@ -491,6 +531,16 @@ class AgentOrchestrator:
         t0 = time.monotonic()
 
         req.profile = ProfileName.DEEP
+        if req.state is not None:
+            req.state.record_decision(
+                "profile",
+                policy_selected=req.profile_policy or "deep",
+                selected="deep",
+                mode=plan.mode,
+                monitor_fast_unhealthy=self._fast_unhealthy,
+                monitor_upgraded=False,
+                reason="多任务 DAG 使用 Deep 合成与执行配置",
+            )
         # Harness：分波执行（失败传播），产出 SharedState
         shared = await self._executor.execute(
             req, plan.tasks, on_event, max_tasks=self._runtime.policy.max_tasks,
@@ -512,7 +562,7 @@ class AgentOrchestrator:
             profile=req.profile.value if req.profile else "deep",
             agent_type=plan.tasks[0].domain.value if plan.tasks else "task_agent",
         )
-        verification = await self._verify(req, synthesized)
+        verification = await self._verify(req, synthesized, task_contracts=shared.task_meta())
 
         execution = self._execution_meta(
             req,
@@ -522,6 +572,10 @@ class AgentOrchestrator:
             tasks=shared.task_meta(),
         )
         execution["verification"] = verification
+        if req.state is not None:
+            req.state.record_decision("verification", **verification)
+            execution["runtime"] = req.state.summary()
+            execution["decision_trace"] = dict(req.state.decision_trace)
         return OrchestratorResult(
             request_id=req.request_id,
             response=synthesized.content,
@@ -561,6 +615,7 @@ class AgentOrchestrator:
         task_req.profile = req.profile
         task_req.complexity_mode = req.complexity_mode
         task_req.complexity_reason = req.complexity_reason
+        task_req.planning_strategy = req.planning_strategy
         task_req.classifier_stage = req.classifier_stage
         task_req.confidence = req.confidence
         return task_req
@@ -628,6 +683,7 @@ class AgentOrchestrator:
                 # Runtime 直接调 ToolManager。
                 runtime = self._runtime
                 result = None
+                tool_started = time.monotonic()
                 if runtime is not None and req.state is not None:
                     await runtime.fire_tool_before(req.state, task.required_tool, task.required_tool_args)
                 try:
@@ -645,6 +701,10 @@ class AgentOrchestrator:
                             result.data if result is not None and result.success else None,
                             result.error if result is not None and not result.success else None,
                         )
+                    TaskAgent._record_tool_trace(
+                        task_req, task.required_tool, result,
+                        (time.monotonic() - tool_started) * 1000,
+                    )
                 if result is not None and result.success:
                     response.tools_used.append(task.required_tool)
                     content = str(task.required_tool_args.get("content", "待办事项"))
@@ -671,10 +731,40 @@ class AgentOrchestrator:
         # 把 Fast 临时升级为 Deep。保留原始选择，便于评测路由策略且不掩盖降级。
         req.profile_policy = selected.value
         # Monitor 反馈：Fast 在线表现不健康 → 临时升级 Deep（有限反馈，不引入在线学习）
-        if selected == ProfileName.FAST and self._fast_unhealthy:
+        monitor_upgraded = selected == ProfileName.FAST and self._fast_unhealthy
+        actual = ProfileName.DEEP if monitor_upgraded else selected
+        if req.state is not None:
+            req.state.record_decision(
+                "profile",
+                policy_selected=selected.value,
+                selected=actual.value,
+                mode=mode,
+                monitor_fast_unhealthy=self._fast_unhealthy,
+                monitor_upgraded=monitor_upgraded,
+            )
+        if monitor_upgraded:
             logger.warning("Fast profile 不健康（Monitor 反馈），临时升级 Deep")
             return ProfileName.DEEP
         return selected
+
+    @staticmethod
+    def _single_task_meta(task: Task, response: AgentResponse) -> Dict[str, Any]:
+        """单任务路径也输出与 DAG 路径同形的 Task/Contract 记录。"""
+        return {
+            "id": task.task_id,
+            "domain": task.domain.value,
+            "action": task.action.value,
+            "goal": task.goal,
+            "depends_on": list(task.depends_on),
+            "contract": task.contract(),
+            "contract_verification": verify_task_contract(task, response),
+            "status": "success" if response.success else "failed",
+            "duration_ms": 0.0,
+            "profile": response.profile,
+            "tools": list(response.tools_used),
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+        }
 
     def _execution_meta(
         self,
@@ -692,6 +782,7 @@ class AgentOrchestrator:
             "domain": req.domain.value if req.domain else None,
             "classifier_stage": req.classifier_stage,
             "complexity_reason": req.complexity_reason,
+            "planning_strategy": getattr(req, "planning_strategy", "") or None,
             "agents": list(dict.fromkeys(agents)),
             "tools": list(dict.fromkeys(tool for resp in responses for tool in resp.tools_used)),
             "tasks": tasks or [],
@@ -720,6 +811,7 @@ class AgentOrchestrator:
         # Runtime 执行摘要（step/tool/retry 计数与 trace_id），纯增量字段
         if req.state is not None:
             meta["runtime"] = req.state.summary()
+            meta["decision_trace"] = dict(req.state.decision_trace)
         # 查询理解产出：needs_knowledge（观测与 Verifier 消费）
         if req.state_query:
             meta["query_understanding"] = req.state_query
@@ -788,7 +880,12 @@ class AgentOrchestrator:
 
     # ── 出口校验（Verifier / Grounding）──────────────────────────────────────
 
-    async def _verify(self, req: Request, response: AgentResponse) -> Dict[str, Any]:
+    async def _verify(
+        self,
+        req: Request,
+        response: AgentResponse,
+        task_contracts: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """出口校验：规则校验全量，LLM 判定按策略/路径启用。
 
         只标注不阻断（honest-by-design）：flags 进 execution meta 与
@@ -804,6 +901,7 @@ class AgentOrchestrator:
             profile=response.profile,
             write_tools=write_tools,
             needs_knowledge=needs_knowledge,
+            task_contracts=task_contracts,
         )
         for flag in result.flags:
             self._verification_flags[flag] = self._verification_flags.get(flag, 0) + 1

@@ -67,6 +67,7 @@ class EvalResult:
     scores:     Dict[str, float]
     detail:     str = ""
     metadata:   Dict[str, Any] = field(default_factory=dict)
+    failure_stage: str = ""  # intent/planning/routing/retrieval/tool/generation/grounding/verification/unknown
 
 
 @dataclass
@@ -582,6 +583,7 @@ class EndToEndEvaluator:
                     "correct": intent_metrics.get("correct", 0),
                     "cases": intent_metrics.get("cases", []),
                 },
+                failure_stage="" if passed else "intent",
             ))
 
         # 2. 对话质量评测（调用 orchestrator 产出回复，再用独立 Judge 模型评分）
@@ -720,7 +722,11 @@ class EndToEndEvaluator:
                 "conv_id": conv_id,
                 "judge_failed": scores.judge_failed,
                 "judge_error": scores.error,
+                "request_id": getattr(orch_result, "request_id", orch_req.request_id),
             }
+            execution = getattr(orch_result, "execution", {}) or {}
+            runtime = execution.get("runtime", {}) if isinstance(execution, dict) else {}
+            metadata["trace_id"] = execution.get("trace_id") or runtime.get("trace_id")
 
             # 生成端 RAG 硬指标：Citation Correctness（确定性）+ Faithfulness（Judge）
             if self._retrieval_evaluator is not None:
@@ -759,6 +765,8 @@ class EndToEndEvaluator:
             history.append({"role": "assistant", "content": actual_answer})
 
             test_id = f"dialog_{case_idx}" if len(questions) == 1 else f"dialog_{case_idx}_turn_{turn_idx}"
+            failure_stage = self._failure_stage(orch_result, passed, score_dict, metadata)
+            metadata["failure_stage"] = failure_stage
 
             # 不达标样本留痕：Judge 自身失败单独记录（评判故障 ≠ 质量差），
             # 质量不达标则连同问题/回答/低分指标一并落日志，供事后复盘。
@@ -769,7 +777,8 @@ class EndToEndEvaluator:
             }
             if scores.judge_failed:
                 logger.warning(
-                    f"[Eval] Judge 失败 test_id={test_id} conv_id={conv_id} "
+                        f"[Eval] Judge 失败 test_id={test_id} conv_id={conv_id} "
+                    f"request_id={metadata['request_id']} trace_id={metadata['trace_id']} failure_stage={failure_stage} "
                     f"question={str(question)[:_LOG_QUESTION_MAX]!r} error={scores.error}"
                 )
             else:
@@ -786,6 +795,7 @@ class EndToEndEvaluator:
                 if not passed or low or failed_flags:
                     logger.warning(
                         f"[Eval] 质量不达标 test_id={test_id} conv_id={conv_id} user_id={user_id} "
+                        f"request_id={metadata['request_id']} trace_id={metadata['trace_id']} failure_stage={failure_stage} "
                         f"question={str(question)[:_LOG_QUESTION_MAX]!r} "
                         f"overall={scores.overall:.3f} 低分指标={low} "
                         f"judge_failed_flags={failed_flags or None} "
@@ -801,6 +811,7 @@ class EndToEndEvaluator:
                 scores=score_dict,
                 detail=f"Q: {question[:30]}... → 综合评分 {scores.overall:.3f}",
                 metadata=metadata,
+                failure_stage=failure_stage,
             ))
 
         return results
@@ -853,6 +864,9 @@ class EndToEndEvaluator:
                     "expected_agent": expected_agent,
                     "actual_domain": actual_domain,
                     "ok": turn_ok,
+                    "request_id": getattr(orch_result, "request_id", orch_req.request_id),
+                    "trace_id": (getattr(orch_result, "execution", {}) or {}).get("trace_id")
+                    or ((getattr(orch_result, "execution", {}) or {}).get("runtime", {}) or {}).get("trace_id"),
                 })
 
             results.append(EvalResult(
@@ -865,8 +879,36 @@ class EndToEndEvaluator:
                            for d in details
                        ),
                 metadata={"case": details},
+                failure_stage="" if passed else "routing",
             ))
         return results
+
+    @staticmethod
+    def _failure_stage(
+        orch_result: Any,
+        passed: bool,
+        scores: Dict[str, float],
+        metadata: Dict[str, Any],
+    ) -> str:
+        """轻量、确定性的失败归因；未知时不伪造结论。"""
+        if passed and not any(v < EndToEndEvaluator.PASS_THRESHOLD for k, v in scores.items() if k != "overall"):
+            return ""
+        execution = getattr(orch_result, "execution", {}) or {}
+        verification = execution.get("verification", {}) if isinstance(execution, dict) else {}
+        flags = set(verification.get("flags", []) if isinstance(verification, dict) else [])
+        if {"llm_ungrounded", "citation_without_evidence"} & flags or metadata.get("faithfulness", 1.0) < EndToEndEvaluator.PASS_THRESHOLD:
+            return "grounding"
+        if "task_contract_failed" in flags or "write_claim_without_tool" in flags:
+            return "verification"
+        if "expected_retrieval_missing" in flags or not metadata.get("sources", ["sentinel"]):
+            return "retrieval"
+        runtime = execution.get("runtime", {}) if isinstance(execution, dict) else {}
+        tool_trace = runtime.get("tool_trace", []) if isinstance(runtime, dict) else []
+        if any(not item.get("success", True) for item in tool_trace if isinstance(item, dict)):
+            return "tool"
+        if metadata.get("judge_failed"):
+            return "unknown"
+        return "generation"
 
     @staticmethod
     def _dialog_turns(case: Dict[str, Any]) -> List[str]:
@@ -967,6 +1009,7 @@ class EndToEndEvaluator:
                     scores=dict(r.get("scores", {})),
                     detail=r.get("detail", ""),
                     metadata=dict(r.get("metadata", {})),
+                    failure_stage=r.get("failure_stage", ""),
                 )
                 for r in data.get("results", [])
             ],

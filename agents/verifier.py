@@ -67,6 +67,7 @@ class ResponseVerifier:
         tool_evidence: List[Dict[str, Any]],
         write_tools: FrozenSet[str],
         needs_knowledge: bool = False,
+        task_contracts: Optional[List[Dict[str, Any]]] = None,
     ) -> List[str]:
         flags: List[str] = []
         if _CITATION_RE.search(content or "") and not tool_evidence:
@@ -77,6 +78,10 @@ class ResponseVerifier:
         # retrieval evidence → 标记异常（只标注不阻断，提示 RAG 链路未落地）
         if needs_knowledge and not tool_evidence:
             flags.append("expected_retrieval_missing")
+        # Task Contract 的完成条件由 Harness 确定性校验；出口 Verifier 只汇总
+        # 该事实，不再让 LLM 重新猜一次任务是否完成。
+        if any(not bool((item.get("contract_verification") or {}).get("passed", True)) for item in (task_contracts or [])):
+            flags.append("task_contract_failed")
         return flags
 
     # ── LLM 校验（可选，fail-open）───────────────────────────────────────────
@@ -142,12 +147,15 @@ class ResponseVerifier:
         profile: str,
         write_tools: FrozenSet[str],
         needs_knowledge: bool = False,
+        task_contracts: Optional[List[Dict[str, Any]]] = None,
     ) -> VerificationResult:
         """执行出口校验：规则全量 + 可选 LLM（DEEP/执行路径）。"""
         if not (content or "").strip():
             return VerificationResult(source="skip")
 
-        flags = self._rule_flags(content, tools_used, tool_evidence, write_tools, needs_knowledge)
+        flags = self._rule_flags(
+            content, tools_used, tool_evidence, write_tools, needs_knowledge, task_contracts,
+        )
         source = "rules"
 
         use_llm = (

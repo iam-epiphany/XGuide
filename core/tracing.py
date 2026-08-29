@@ -61,6 +61,18 @@ class Trace:
         self.created = time.time()
         self.spans: List[Span] = []
         self.tags: Dict[str, Any] = {}
+        # 请求级的结构化决策与工具记录。与 span（时序/耗时）互补，避免把关键
+        # 决策散落在日志字符串里，排障时只需读取一条 trace。
+        self.decisions: Dict[str, Any] = {}
+        self.tool_calls: List[Dict[str, Any]] = []
+
+    def record_decision(self, stage: str, detail: Dict[str, Any]) -> None:
+        """记录一个可序列化的请求决策快照（同 stage 后写覆盖前写）。"""
+        self.decisions[stage] = detail
+
+    def record_tool_call(self, detail: Dict[str, Any]) -> None:
+        """追加一条工具执行结果；数据已在 RunState 侧脱敏/压缩。"""
+        self.tool_calls.append(detail)
 
     @property
     def duration_ms(self) -> float:
@@ -74,6 +86,8 @@ class Trace:
             "duration_ms": round(self.duration_ms, 2),
             "tags": {k: str(v)[:200] for k, v in self.tags.items()},
             "spans": [span.to_dict() for span in self.spans],
+            "decision_trace": self.decisions,
+            "tool_calls": self.tool_calls,
         }
 
 

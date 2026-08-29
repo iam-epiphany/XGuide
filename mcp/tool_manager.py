@@ -48,6 +48,7 @@ class ToolResult:
     cached:         bool = False
     latency_ms:     float = 0.0
     reranked:       bool = False   # 是否经过重排
+    fallback_used:  bool = False   # 是否由工具 fallback 产生（成功也应可观测）
 
 
 @dataclass
@@ -322,6 +323,7 @@ class MCPToolManager:
                 data=data,
                 tool_name=tool.name,
                 error=error,
+                fallback_used=True,
             )
         except Exception as ex:
             logger.error(f"工具降级失败: {tool.name} — {ex}")

@@ -26,7 +26,15 @@ class TraceMiddleware(RuntimeMiddleware):
         trace = current_trace()
         if trace is None:
             trace = begin_trace("runtime")  # CLI / 评测等无请求级 trace 的路径
+            ctx.state.meta["_runtime_owned_trace"] = True
         ctx.state.trace_id = trace.trace_id
+        ctx.state.record_decision("runtime", request_id=ctx.state.request_id, trace_id=trace.trace_id)
+
+    async def after_run(self, ctx: RunContext) -> None:
+        """仅收尾由 Runtime 自己创建的 Trace，HTTP 请求拥有的 Trace 不受影响。"""
+        if ctx.state.meta.pop("_runtime_owned_trace", False):
+            from core.tracing import end_trace
+            end_trace()
 
 
 class GuardMiddleware(RuntimeMiddleware):

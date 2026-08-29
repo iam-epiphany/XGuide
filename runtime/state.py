@@ -40,6 +40,11 @@ class RunState:
     # middleware 自由扩展位（如 SkillMiddleware 的 skill_prompt_by_msg）
     meta: Dict[str, Any] = field(default_factory=dict)
 
+    # 请求级结构化观测：只保存摘要，不保存工具参数/结果正文，避免敏感数据和
+    # 大对象进入 trace。每个 RunState 独立持有，天然隔离并发请求。
+    tool_trace: List[Dict[str, Any]] = field(default_factory=list)
+    decision_trace: Dict[str, Any] = field(default_factory=dict)
+
     # 执行策略引用（BaseAgent 等执行层读取预算，缺省 None 时回落旧常量）
     policy: Optional[Any] = None
 
@@ -48,6 +53,57 @@ class RunState:
 
     def add_error(self, message: str) -> None:
         self.errors.append(message)
+
+    def record_decision(self, stage: str, **detail: Any) -> None:
+        """记录本请求的决策快照，并同步写入当前 Trace（若已绑定）。"""
+        snapshot = dict(detail)
+        self.decision_trace[stage] = snapshot
+        try:
+            from core.tracing import current_trace
+            trace = current_trace()
+            if trace is not None:
+                trace.record_decision(stage, snapshot)
+        except Exception:
+            # 观测不可影响业务；CLI/离线环境也允许没有 Trace。
+            pass
+
+    def record_tool_call(
+        self,
+        *,
+        tool_name: str,
+        task_id: str = "",
+        tool_round: int = 0,
+        success: bool,
+        error: Optional[str] = None,
+        latency_ms: float = 0.0,
+        cache_hit: bool = False,
+        reranked: bool = False,
+        fallback_used: bool = False,
+        result_count: int = 0,
+        evidence_count: int = 0,
+    ) -> None:
+        """记录一次工具执行的统一摘要，供 Runtime、Trace 与 Eval 共用。"""
+        detail = {
+            "tool_name": tool_name,
+            "task_id": task_id,
+            "tool_round": tool_round,
+            "success": bool(success),
+            "error": str(error)[:200] if error else None,
+            "latency_ms": round(float(latency_ms), 2),
+            "cache_hit": bool(cache_hit),
+            "reranked": bool(reranked),
+            "fallback_used": bool(fallback_used),
+            "result_count": max(0, int(result_count)),
+            "evidence_count": max(0, int(evidence_count)),
+        }
+        self.tool_trace.append(detail)
+        try:
+            from core.tracing import current_trace
+            trace = current_trace()
+            if trace is not None:
+                trace.record_tool_call(detail)
+        except Exception:
+            pass
 
     def summary(self) -> Dict[str, Any]:
         """运行摘要（execution meta 的纯增量字段，不透出敏感信息）。"""
@@ -59,4 +115,6 @@ class RunState:
             "tool_rounds": self.tool_round_count,
             "retries": self.retry_count,
             "errors": list(self.errors),
+            "tool_trace": list(self.tool_trace),
+            "decision_trace": dict(self.decision_trace),
         }

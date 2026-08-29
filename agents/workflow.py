@@ -95,6 +95,20 @@ class Task:
     # 由 Planner 声明，避免执行器硬编码任务标识。
     required_tool: Optional[str] = None
     required_tool_args: Dict[str, Any] = field(default_factory=dict)
+    # Task Contract：Planner 给 Task 的可验证边界。默认由确定性规则补齐；LLM
+    # 只能细化文字，不能绕过执行端的硬校验。
+    inputs: List[str] = field(default_factory=list)
+    expected_output: str = ""
+    acceptance_criteria: List[str] = field(default_factory=list)
+    risk_level: str = "low"  # low / medium / high
+
+    def contract(self) -> Dict[str, Any]:
+        return {
+            "inputs": list(self.inputs),
+            "expected_output": self.expected_output,
+            "acceptance_criteria": list(self.acceptance_criteria),
+            "risk_level": self.risk_level,
+        }
 
 
 @dataclass
@@ -102,6 +116,7 @@ class ExecutionPlan:
     """Planner 统一输出：任务 DAG + 推导出的复杂度模式。"""
     tasks: List[Task]
     reason: str = ""
+    strategy: str = "fast_path"  # fast_path / llm / benchmark_single_agent
 
     @property
     def mode(self) -> str:
@@ -153,6 +168,8 @@ class SharedState:
             "action": task.action.value,
             "goal": task.goal,
             "depends_on": list(task.depends_on),
+            "contract": task.contract(),
+            "contract_verification": verify_task_contract(task, response),
             "status": status,
             "duration_ms": round(duration_ms, 1),
             "profile": response.profile if response else "",
@@ -177,6 +194,21 @@ class SharedState:
         if not deps:
             return ""
         return "\n\n".join(f"[{dep}]\n{self._results[dep].content}" for dep in deps)
+
+
+def verify_task_contract(task: Task, response: Optional[AgentResponse]) -> Dict[str, Any]:
+    """Task 后置条件的确定性校验（不调用 LLM，不阻断请求）。"""
+    nonempty = bool(response is not None and (response.content or "").strip())
+    required_tool_ok = (
+        task.required_tool is None
+        or bool(response is not None and task.required_tool in response.tools_used)
+    )
+    checks = {
+        "nonempty_output": nonempty,
+        "required_tool_executed": required_tool_ok,
+    }
+    failed = [name for name, ok in checks.items() if not ok]
+    return {"passed": not failed, "checks": checks, "failed": failed}
 
 
 class TaskPlanner:
@@ -243,7 +275,7 @@ class TaskPlanner:
         """
         fast = self._fast_plan(req, domain, action)
         if fast.mode != "single" or not self._needs_llm_planning(req):
-            return self._apply_write_hints(fast)
+            return self._finalize_plan(fast)
         llm_plan = await self._llm_plan(req)
         # 单任务 LLM 规划只能细化目标，不能推翻已完成的顶层意图识别。
         # 否则规划器偶发的领域漂移会让执行器选错领域人格和结构化工具，出现
@@ -259,7 +291,7 @@ class TaskPlanner:
                 )
             )
         ):
-            return self._apply_write_hints(llm_plan)
+            return self._finalize_plan(llm_plan)
         if llm_plan is not None:
             logger.warning(
                 "LLM 单任务规划与顶层意图不一致，回落 Fast Path: "
@@ -269,7 +301,7 @@ class TaskPlanner:
                 llm_plan.tasks[0].domain.value,
                 llm_plan.tasks[0].action.value,
             )
-        return self._apply_write_hints(fast)  # LLM 不可用/输出非法：回落本地（行为不比现状差）
+        return self._finalize_plan(fast)  # LLM 不可用/输出非法：回落本地（行为不比现状差）
 
     # ── Fast Path（本地规则）────────────────────────────────────────────────
 
@@ -347,6 +379,30 @@ class TaskPlanner:
                 hinted = self._write_tool_hint(task.message)
                 if hinted:
                     task.allowed_write_tools = hinted
+        return plan
+
+    def _finalize_plan(self, plan: ExecutionPlan) -> ExecutionPlan:
+        """用确定性规则补全任务 Contract，保证 Fast/LLM 规划同一口径。"""
+        self._apply_write_hints(plan)
+        for task in plan.tasks:
+            if not task.inputs:
+                task.inputs = ["用户请求", *[f"任务 {dep} 的已验证结果" for dep in task.depends_on]]
+            if not task.expected_output:
+                task.expected_output = "完成指定写操作并返回执行结果" if task.action == IntentAction.REQUEST else "与任务目标相关的可用答复"
+            if not task.acceptance_criteria:
+                task.acceptance_criteria = ["返回非空结果"]
+                if task.required_tool:
+                    task.acceptance_criteria.append(f"已调用必需工具：{task.required_tool}")
+            if task.risk_level not in {"low", "medium", "high"}:
+                task.risk_level = "low"
+            if task.risk_level == "low":
+                if task.action == IntentAction.REQUEST:
+                    task.risk_level = "high"
+                elif task.domain in {
+                    IntentDomain.ACADEMIC, IntentDomain.CAMPUS_LIFE,
+                    IntentDomain.AFFAIRS, IntentDomain.IT_HELP,
+                }:
+                    task.risk_level = "medium"
         return plan
 
     @staticmethod
@@ -502,12 +558,16 @@ class TaskPlanner:
             "任务字段：\n"
             '  {"id": "t1", "domain": "<领域值>", "action": "<query/request>", '
             '"goal": "<任务目标>", "message": "<给该子任务的独立请求>", '
-            '"depends_on": ["<前置任务id>"], "tools": ["<允许调用的工具名>"]}\n'
+            '"depends_on": ["<前置任务id>"], "tools": ["<允许调用的工具名>"], '
+            '"inputs": ["<所需输入>"], "expected_output": "<预期输出>", '
+            '"acceptance_criteria": ["<完成条件>"], "risk_level": "<low/medium/high>"}\n'
             "- domain 可选值: academic, campus_life, affairs, it_help, personal\n"
             "- action: query=查询咨询；request=需要系统写数据/产生副作用（创建待办等）\n"
             "- 只有明确需要写操作的任务才是 request，查询类任务一律 query\n"
             "- tools 可选：本任务允许调用的工具名数组（最小权限，如 [\"add_todo\"]）；"
             "查询类任务不写 tools 即可\n"
+            "- Contract：inputs/expected_output/acceptance_criteria 描述执行边界；"
+            "risk_level 只能是 low、medium、high。写操作必须 high；不确定时留空，系统会用确定性规则补全\n"
             "- depends_on 引用前面已定义任务的 id；无前置依赖省略或为空数组\n"
             f"用户消息: {req.message!r}\n\n"
             "返回格式（仅 JSON，不要其他文字）:\n"
@@ -541,7 +601,7 @@ class TaskPlanner:
             if tasks is None:
                 return None
             reason = str(data.get("reason") or "")[:120] or "LLM 规划任务链"
-            return ExecutionPlan(tasks, reason=reason)
+            return ExecutionPlan(tasks, reason=reason, strategy="llm")
         except Exception as ex:
             logger.warning(f"LLM 规划失败，回落本地规则: {ex}")
             return None
@@ -615,6 +675,18 @@ class TaskPlanner:
                 ):
                     return None  # 引用了未注册工具 → 整链作废（fail-closed）
                 allowed_write_tools = list(dict.fromkeys(t.strip() for t in raw_tools))
+            # Contract 字段可由 LLM 细化，但类型/风险等级必须通过硬校验；缺省
+            # 统一由 _finalize_plan 的确定性规则补齐。
+            raw_inputs = raw.get("inputs", [])
+            raw_criteria = raw.get("acceptance_criteria", [])
+            if not isinstance(raw_inputs, list) or not all(isinstance(v, str) and v.strip() for v in raw_inputs):
+                return None
+            if not isinstance(raw_criteria, list) or not all(isinstance(v, str) and v.strip() for v in raw_criteria):
+                return None
+            raw_output = raw.get("expected_output", "")
+            raw_risk = str(raw.get("risk_level", "low")).lower()
+            if not isinstance(raw_output, str) or raw_risk not in {"low", "medium", "high"}:
+                return None
             tasks.append(Task(
                 task_id=task_id,
                 domain=domain,
@@ -623,6 +695,10 @@ class TaskPlanner:
                 message=message,
                 depends_on=deps,
                 allowed_write_tools=allowed_write_tools,
+                inputs=list(dict.fromkeys(v.strip() for v in raw_inputs)),
+                expected_output=raw_output.strip(),
+                acceptance_criteria=list(dict.fromkeys(v.strip() for v in raw_criteria)),
+                risk_level=raw_risk,
             ))
             seen_ids.add(task_id)
         # 依赖引用与无环校验
@@ -737,6 +813,8 @@ class TaskExecutor:
                     ), status=TASK_FAILED)
                     shared.set_task_meta(t, TASK_FAILED, duration_ms)
 
+        if getattr(req, "state", None) is not None:
+            req.state.record_decision("tasks", tasks=shared.task_meta())
         return shared
 
 
