@@ -42,6 +42,7 @@ from api.routers import knowledge as knowledge_router  # noqa: E402
 from api.routers import mcp as mcp_router  # noqa: E402
 from api.routers import memory as memory_router  # noqa: E402
 from api.routers import monitor as monitor_router  # noqa: E402
+from api.routers import product as product_router  # noqa: E402
 from api.routers import system as system_router  # noqa: E402
 
 # 向后兼容：旧测试/脚本直接访问 api.main 的组件与请求模型
@@ -87,6 +88,19 @@ async def lifespan(app: FastAPI):
     await state._setup_external_mcp()
     await state._monitor.start()
 
+    async def refresh_public_notices() -> None:
+        """启动时及其后定期同步公开通知；失败只记日志，不阻塞主服务。"""
+        interval = max(300, int(os.getenv("ECHOGUIDE_RADAR_INTERVAL_SECONDS", "1800")))
+        while True:
+            try:
+                result = await state._campus_radar.refresh()
+                logger.info("校园通知雷达同步：检查 %s 条，新增 %s 条", result["checked"], result["new_events"])
+            except Exception as ex:
+                logger.warning("校园通知雷达同步失败（将在下个周期重试）: %s", ex)
+            await asyncio.sleep(interval)
+
+    state._spawn_background(refresh_public_notices())
+
     # main 命名空间同步（router 读 state.*，这里保持向后兼容别名）
     _monitor = state._monitor
     _memory = state._memory
@@ -111,7 +125,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=state._allowed_origins(),
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "MCP-Protocol-Version"],
     allow_credentials=True,
 )
@@ -133,6 +147,7 @@ for _router in (
     memory_router.router,   # /personal/*
     knowledge_router.router,  # /knowledge/*
     monitor_router.router,  # /monitor /metrics /traces /eval/run
+    product_router.router,  # /personal/today /inbox /student-profile
 ):
     app.include_router(_router)
 

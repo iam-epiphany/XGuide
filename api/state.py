@@ -36,6 +36,7 @@ _skill_manager = None
 _semantic_cache = None
 _personal_service = None
 _campus_store = None
+_campus_radar = None
 _kb           = None
 
 # 后台任务跟踪：防止 fire-and-forget 任务被 GC 回收或异常无人检索
@@ -127,10 +128,11 @@ def _anthropic_cfg() -> Dict[str, Any]:
 def _build_runtime() -> None:
     """构造运行期组件并注册工具。"""
     global _orchestrator, _memory, _tool_manager, _monitor, _evaluator, _skill_manager
-    global _personal_service, _campus_store, _kb, _semantic_cache
+    global _personal_service, _campus_store, _campus_radar, _kb, _semantic_cache
 
     from agents.agent_orchestrator import AgentOrchestrator
     from campus.store import CampusInfoStore
+    from campus.radar import CampusRadar
     from core.skill_loader import SkillManager
     from evaluation.evaluator import EndToEndEvaluator
     from mcp.knowledge_base import KnowledgeBase
@@ -148,8 +150,8 @@ def _build_runtime() -> None:
     from tools.campus_tool import campus_info_handler
     from tools.ddl_tool import query_ddl_handler
     from tools.it_tool import diagnose_it_issue_handler
-    from tools.schedule_tool import query_schedule_handler
-    from tools.todo_tool import add_todo_handler, complete_todo_handler, query_todo_handler
+    from tools.schedule_tool import query_free_time_handler, query_schedule_handler
+    from tools.todo_tool import add_todo_handler, complete_todo_handler, delete_todo_handler, query_todo_handler, update_todo_handler
     from tools.weather import weather_handler
 
     cfg = _anthropic_cfg()
@@ -308,6 +310,8 @@ def _build_runtime() -> None:
     # ── 个人数据中心（课表 / 待办 / DDL，按 user_id 隔离，SQLite 持久化）──
     _personal_service = PersonalService(PersonalStore())
     logger.info("个人数据中心已就绪: %s", _personal_service.store.db_path)
+    _campus_radar = CampusRadar(_personal_service.store)
+    logger.info("校园通知雷达已就绪（公开源 %s 个）", 3)
 
     _tool_manager.register(Tool(
         name="query_schedule",
@@ -335,6 +339,13 @@ def _build_runtime() -> None:
         },
         cache_ttl=0.0,
         effect=ToolEffect.READ,
+    ))
+    _tool_manager.register(Tool(
+        name="query_free_time",
+        description="查询某天的个人空闲时间段。date 支持 今天/明天/周X/YYYY-MM-DD。",
+        handler=with_service(query_free_time_handler, personal_service=_personal_service),
+        schema={"type": "object", "properties": {"date": {"type": "string", "description": "日期表达式，默认今天"}}},
+        cache_ttl=0.0, effect=ToolEffect.READ,
     ))
     _tool_manager.register(Tool(
         name="add_todo",
@@ -366,6 +377,20 @@ def _build_runtime() -> None:
         },
         cache_ttl=0.0,
         effect=ToolEffect.WRITE,  # 状态修改类工具：显式副作用声明（fail-closed）
+    ))
+    _tool_manager.register(Tool(
+        name="update_todo",
+        description="修改待办/DDL/考试；传入 id 和要改的 content、kind 或 due_at。",
+        handler=with_service(update_todo_handler, personal_service=_personal_service),
+        schema={"type": "object", "properties": {"id": {"type": "integer"}, "content": {"type": "string"}, "kind": {"type": "string"}, "due_at": {"type": "string"}}, "required": ["id"]},
+        cache_ttl=0.0, effect=ToolEffect.WRITE,
+    ))
+    _tool_manager.register(Tool(
+        name="delete_todo",
+        description="删除待办/DDL/考试，需传入 id。",
+        handler=with_service(delete_todo_handler, personal_service=_personal_service),
+        schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+        cache_ttl=0.0, effect=ToolEffect.WRITE,
     ))
     _tool_manager.register(Tool(
         name="query_ddl",

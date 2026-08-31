@@ -187,6 +187,52 @@ export async function deleteTodo(settings, id) {
   })
 }
 
+export async function updateTodo(settings, id, changes) {
+  return requestJson(backendMeta(settings).baseUrl, `/personal/todo/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes)
+  })
+}
+
+export async function getToday(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/personal/today')
+}
+
+export async function getReminders(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/personal/reminders')
+}
+
+export async function getFreeTime(settings, when = '今天') {
+  return requestJson(backendMeta(settings).baseUrl, `/personal/free-time?when=${encodeURIComponent(when)}`)
+}
+
+export async function getStudentProfile(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/student-profile')
+}
+
+export async function saveStudentProfile(settings, profile) {
+  return requestJson(backendMeta(settings).baseUrl, '/student-profile', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile)
+  })
+}
+
+export async function getInbox(settings, status = 'active') {
+  return requestJson(backendMeta(settings).baseUrl, `/inbox?status=${encodeURIComponent(status)}`)
+}
+
+export async function refreshInbox(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/inbox/refresh', { method: 'POST' })
+}
+
+export async function setInboxStatus(settings, id, status) {
+  return requestJson(backendMeta(settings).baseUrl, `/inbox/${id}/status`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+  })
+}
+
+export async function addInboxToPlan(settings, id) {
+  return requestJson(backendMeta(settings).baseUrl, `/inbox/${id}/add-to-plan`, { method: 'POST' })
+}
+
 function buildChatPayload(settings, message) {
   return {
     message,

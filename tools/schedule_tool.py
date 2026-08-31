@@ -41,3 +41,17 @@ async def query_schedule_handler(params: Dict[str, Any], context: Any) -> Dict[s
         )
     result["available"] = True
     return result
+
+
+async def query_free_time_handler(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """查询某天的空闲时段，date 语义与 query_schedule 一致。"""
+    service: PersonalService = context.get("personal_service")
+    user_id = (context.get("user_id") or "").strip() or "anonymous"
+    if user_id == "anonymous":
+        return {"available": False, "auth_required": True, "message": "请先登录后查询空闲时间。"}
+    if service is None:
+        return {"available": False, "message": "个人数据中心不可用，请稍后重试。"}
+    try:
+        return await service.free_time(user_id, str(params.get("date", "今天")).strip() or "今天")
+    except DateExprError as ex:
+        return {"available": False, "message": str(ex)}

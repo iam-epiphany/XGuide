@@ -156,6 +156,46 @@ textarea:focus {
   gap: 10px;
 }
 
+.product-nav { display: flex; align-items: center; gap: 3px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+.nav-tab { min-height: 32px; padding: 0 11px; border-radius: 8px; background: transparent; color: var(--text-muted); box-shadow: none; font-size: 13px; }
+.nav-tab:hover { background: var(--xdu-navy-light); color: var(--xdu-navy); filter: none; }
+.nav-tab.active { background: var(--xdu-navy); color: #fff; }
+.inbox-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 3px; padding: 0 4px; border-radius: 99px; background: var(--xdu-red); color: #fff; font-size: 10px; }
+.utility-button { padding: 0 10px; }
+
+/* ── 产品首页：以“一天的节奏”组织信息，而不是仪表盘堆叠 ───────────────── */
+.product-page { overflow-y: auto; min-height: 0; padding: 38px 8px 28px; }
+.today-page, .inbox-page { max-width: 980px; width: 100%; margin: 0 auto; }
+.today-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin: 4px 0 28px; padding: 0 4px 20px; border-bottom: 2px solid var(--xdu-navy); }
+.page-kicker, .card-label { margin: 0 0 8px; color: var(--xdu-red); font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.today-hero h2, .product-empty h2 { margin: 0; color: var(--xdu-navy); font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; }
+.today-hero p:not(.page-kicker), .product-empty p { margin: 9px 0 0; color: var(--text-muted); }
+.quiet-action { min-height: 36px; background: #fff; color: var(--xdu-navy); border: 1px solid var(--xdu-navy); box-shadow: none; white-space: nowrap; }
+.today-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.today-card, .next-course-card { min-height: 170px; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 10px 25px rgba(24, 32, 44, .055); }
+.next-course-card { grid-column: span 2; display: flex; flex-direction: column; justify-content: center; min-height: 186px; border: 0; color: #fff; background: linear-gradient(120deg, #16365f 0%, #1e3a5f 60%, #225381 100%); box-shadow: 0 18px 35px rgba(24, 58, 95, .2); }
+.next-course-card .card-label { color: #f7c7d1; }
+.next-course-card h3 { margin: 0; font-size: clamp(27px, 4vw, 39px); letter-spacing: -.03em; }
+.next-course-card p:not(.card-label) { margin: 9px 0 0; color: #d8e5f4; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.text-action { min-height: auto; padding: 3px 0; border-radius: 0; color: var(--xdu-navy); background: transparent; box-shadow: none; font-size: 12px; font-weight: 800; }
+.text-action:hover { color: var(--xdu-red); filter: none; }
+.timeline-list, .simple-list { display: grid; gap: 10px; margin: 13px 0 0; padding: 0; list-style: none; }
+.timeline-list li { display: flex; gap: 12px; align-items: flex-start; }
+.timeline-list b { min-width: 42px; color: var(--xdu-red); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.timeline-list span, .simple-list span { display: grid; gap: 3px; color: var(--text); }
+.timeline-list small, .simple-list small { color: var(--text-muted); }
+.simple-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text); font-size: 14px; }
+.simple-list em { color: var(--xdu-navy); font-size: 12px; font-style: normal; white-space: nowrap; }.simple-list em.overdue { color: var(--xdu-red); font-weight: 800; }
+.check-button { width: 22px; min-width: 22px; height: 22px; min-height: 22px; padding: 0; border: 1px solid #9aaaba; border-radius: 50%; background: #fff; color: var(--xdu-navy); box-shadow: none; }.check-button:hover { border-color: var(--xdu-red); color: var(--xdu-red); filter: none; }
+.deadline-card { border-top: 3px solid var(--xdu-red); }.reminders-card { grid-column: span 2; background: #fff7f8; border-color: #f3d5db; }.empty-copy { margin: 18px 0 0; color: var(--text-muted); font-size: 14px; }
+.product-empty { display: grid; justify-items: start; gap: 10px; max-width: 620px; margin: 82px auto; text-align: left; }.product-empty.compact { align-items: center; justify-items: center; text-align: center; }.page-error { margin: 0 0 16px; color: #a30d26; }
+
+/* ── Inbox：来源、原因与下一步都在同一阅读线内 ─────────────────────────── */
+.profile-strip { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: -10px 0 20px; padding: 14px 16px; border-left: 3px solid var(--xdu-red); background: var(--xdu-red-light); }.profile-strip div { display: grid; gap: 3px; }.profile-strip span { color: var(--text-muted); font-size: 13px; }
+.inbox-list { display: grid; gap: 12px; }.inbox-event { padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 6px 16px rgba(24,32,44,.04); }.event-meta { display: flex; gap: 10px; color: var(--text-muted); font-size: 12px; }.event-meta span { color: var(--xdu-navy); font-weight: 800; }.inbox-event h3 { margin: 9px 0 7px; color: var(--xdu-navy); font-size: 19px; }.inbox-event p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.65; }.event-details { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; color: var(--xdu-red); font-size: 12px; font-weight: 700; }.event-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }.event-actions a { color: var(--xdu-navy); font-size: 13px; font-weight: 800; }.event-actions button:not(.text-action) { min-height: 33px; padding: 0 12px; font-size: 12px; }
+.profile-form { display: grid; gap: 14px; }.profile-form label:not(.interest-option) { display: grid; gap: 6px; }.profile-form label > span, .profile-form legend { color: var(--text-muted); font-size: 13px; font-weight: 700; }.profile-form select { width: 100%; min-height: 42px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }.profile-form fieldset { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 2px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }.interest-option { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }.interest-option input { width: auto; }
+
 .kb-button {
   display: inline-flex;
   align-items: center;

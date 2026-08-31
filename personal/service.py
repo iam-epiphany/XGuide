@@ -243,6 +243,12 @@ class PersonalService:
     async def delete_todo(self, user_id: str, todo_id: int) -> bool:
         return await self.store.delete_todo(user_id, todo_id)
 
+    async def update_todo(
+        self, user_id: str, todo_id: int, *, content: Optional[str] = None,
+        kind: Optional[str] = None, due_at: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return await self.store.update_todo(user_id, todo_id, content=content, kind=kind, due_at=due_at)
+
     async def upcoming(
         self,
         user_id: str,
@@ -282,8 +288,12 @@ class PersonalService:
         """
         today = today or datetime.now().astimezone().date()
         schedule = await self.courses_on(user_id, "今天", today)
-        todos = await self.list_todos(user_id, status="open", kinds=["todo"])
+        all_todos = await self.list_todos(user_id, status="open", kinds=["todo"])
+        todos = [t for t in all_todos if not t.get("due_at") or t["due_at"][:10] == today.isoformat()]
         ddls = await self.upcoming(user_id, horizon_days=7, today=today)
+        now_time = datetime.now().astimezone().strftime("%H:%M")
+        next_course = next((course for course in schedule["courses"] if course["end_time"] >= now_time), None)
+        reminders = self._reminder_items(ddls)
         return {
             "date": schedule["date"],
             "weekday": schedule["weekday"],
@@ -291,8 +301,28 @@ class PersonalService:
             "courses": schedule["courses"],
             "todos": todos,
             "upcoming": ddls,
+            "next_course": next_course,
+            "reminders": reminders,
             "has_schedule": await self.store.count_schedule(user_id) > 0,
         }
+
+    async def free_time(
+        self, user_id: str, when: Optional[str] = None, today: Optional[date] = None,
+        start_time: str = "08:00", end_time: str = "22:00",
+    ) -> Dict[str, Any]:
+        """返回某日未被课程占用的时间段，方便直接回答“明天下午有空吗”。"""
+        schedule = await self.courses_on(user_id, when, today)
+        occupied = [(max(start_time, c["start_time"]), min(end_time, c["end_time"])) for c in schedule["courses"]]
+        occupied = sorted((a, b) for a, b in occupied if a < b)
+        free: List[Dict[str, str]] = []
+        cursor = start_time
+        for start, end in occupied:
+            if cursor < start:
+                free.append({"start_time": cursor, "end_time": start})
+            cursor = max(cursor, end)
+        if cursor < end_time:
+            free.append({"start_time": cursor, "end_time": end_time})
+        return {**schedule, "free_periods": free, "available": True}
 
     # ── 提醒（对话内应答）─────────────────────────────────────────────────────
 
@@ -309,5 +339,22 @@ class PersonalService:
             "today": today_sched,
             "tomorrow": tomorrow_sched,
             "upcoming": ddls,
+            "items": self._reminder_items(ddls),
             "has_schedule": await self.store.count_schedule(user_id) > 0,
         }
+
+    @staticmethod
+    def _reminder_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        reminders = []
+        for item in items:
+            days = item["days_left"]
+            if days < 0:
+                level, label = "urgent", "已过期"
+            elif days == 0:
+                level, label = "urgent", "今天到期"
+            elif days <= 3:
+                level, label = "important", f"{days} 天内到期"
+            else:
+                continue
+            reminders.append({**item, "level": level, "label": label})
+        return reminders

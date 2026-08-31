@@ -1,5 +1,5 @@
 """
-待办 / DDL / 考试管理工具 —— query_todo / add_todo / complete_todo。
+待办 / DDL / 考试管理工具 —— query_todo / add_todo / update / complete / delete。
 
 对话场景：
   - "我有什么待办？"            → query_todo
@@ -100,3 +100,39 @@ async def complete_todo_handler(params: Dict[str, Any], context: Any) -> Dict[st
     if todo is None:
         return {"available": False, "message": f"待办 {todo_id} 不存在或不属于当前用户。"}
     return {"available": True, "message": "已标记完成" if done else "已恢复未完成", "todo": todo}
+
+
+async def update_todo_handler(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    if denied := _auth_required(context):
+        return denied
+    service: PersonalService = context.get("personal_service")
+    if service is None:
+        return {"available": False, "message": "个人数据中心不可用，请稍后重试。"}
+    try:
+        todo_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        return {"available": False, "message": "缺少有效的待办 id。"}
+    kind = params.get("kind")
+    if kind is not None and kind not in KINDS:
+        return {"available": False, "message": "kind 仅支持 todo/ddl/exam。"}
+    content = params.get("content")
+    due_at = params.get("due_at")
+    todo = await service.update_todo(_user_id(context), todo_id, content=str(content).strip() if content is not None else None, kind=kind, due_at=str(due_at).strip() if due_at is not None else None)
+    if todo is None:
+        return {"available": False, "message": "待办不存在，或没有可更新的字段。"}
+    return {"available": True, "message": "已更新", "todo": todo}
+
+
+async def delete_todo_handler(params: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    if denied := _auth_required(context):
+        return denied
+    service: PersonalService = context.get("personal_service")
+    if service is None:
+        return {"available": False, "message": "个人数据中心不可用，请稍后重试。"}
+    try:
+        todo_id = int(params.get("id"))
+    except (TypeError, ValueError):
+        return {"available": False, "message": "缺少有效的待办 id。"}
+    if not await service.delete_todo(_user_id(context), todo_id):
+        return {"available": False, "message": "待办不存在或不属于当前用户。"}
+    return {"available": True, "message": "已删除"}

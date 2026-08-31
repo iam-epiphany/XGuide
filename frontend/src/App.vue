@@ -5,20 +5,19 @@
       <div class="brand">
         <div class="brand-mark">西电</div>
         <div class="brand-text">
-          <h1>西电校园助手</h1>
-          <p>EchoGuide · 选课 / 校车 / 食堂 / 教务 / 办事一站问</p>
+          <h1>EchoGuide</h1>
+          <p>你的校园日程与重要通知</p>
         </div>
       </div>
       <div class="topbar-actions">
-        <button class="kb-button" @click="openSchedule">
-          <span class="kb-icon">📅</span> 我的课表
-        </button>
-        <button class="kb-button" @click="openTodos">
-          <span class="kb-icon">✅</span> 待办
-        </button>
-        <button class="kb-button" @click="openObs">
-          <span class="kb-icon">📡</span> 监控
-        </button>
+        <nav class="product-nav" aria-label="主导航">
+          <button :class="['nav-tab', { active: activeTab === 'today' }]" @click="openToday">Today</button>
+          <button :class="['nav-tab', { active: activeTab === 'inbox' }]" @click="openInbox">Inbox <span v-if="inboxNewCount" class="inbox-count">{{ inboxNewCount }}</span></button>
+          <button :class="['nav-tab', { active: activeTab === 'chat' }]" @click="activeTab = 'chat'">Chat</button>
+        </nav>
+        <button class="kb-button utility-button" @click="openSchedule"><span class="kb-icon">📅</span>课表</button>
+        <button class="kb-button utility-button" @click="openTodos"><span class="kb-icon">✅</span>事项</button>
+        <button v-if="debugMode" class="kb-button utility-button" @click="openObs"><span class="kb-icon">📡</span>监控</button>
         <button v-if="authUser?.role === 'admin'" class="kb-button" @click="openKb">
           <span class="kb-icon">📚</span> 知识库
         </button>
@@ -32,8 +31,47 @@
       </div>
     </header>
 
-    <!-- ── 主对话区 ────────────────────────────────────────────────────────── -->
-    <section class="chat-area" ref="chatArea">
+    <!-- ── Today：打开产品后的第一屏 ─────────────────────────────────────── -->
+    <section v-if="activeTab === 'today'" class="product-page today-page">
+      <div v-if="!authUser" class="product-empty">
+        <p class="page-kicker">校园个人 Agent</p><h2>把今天过得明白一点。</h2>
+        <p>登录后，课表、待办、DDL 和考试会在这里汇成一页。</p>
+        <button @click="openAuth('login')">登录并建立个人日程</button>
+      </div>
+      <template v-else>
+        <header class="today-hero">
+          <div><p class="page-kicker">{{ todayDateLabel }}</p><h2>今天，{{ authUser.username }}。</h2><p>{{ todayIntro }}</p></div>
+          <button class="quiet-action" @click="loadToday" :disabled="todayBusy">{{ todayBusy ? '更新中…' : '刷新日程' }}</button>
+        </header>
+        <p v-if="todayError" class="page-error">{{ todayError }}</p>
+        <div v-if="todayData" class="today-grid">
+          <article class="next-course-card">
+            <p class="card-label">下一节课</p>
+            <template v-if="todayData.next_course"><h3>{{ todayData.next_course.course }}</h3><p>{{ todayData.next_course.start_time }}–{{ todayData.next_course.end_time }} · {{ todayData.next_course.location || '地点未填写' }}</p></template>
+            <template v-else><h3>今天没有下一节课</h3><p>{{ todayData.has_schedule ? '留一点空白给自己。' : '导入课表后，这里会显示下一节课。' }}</p></template>
+          </article>
+          <article class="today-card courses-card"><div class="card-head"><p class="card-label">今日课程</p><button class="text-action" @click="openSchedule">管理课表</button></div><ul v-if="todayData.courses?.length" class="timeline-list"><li v-for="course in todayData.courses" :key="course.course + course.start_time"><b>{{ course.start_time }}</b><span>{{ course.course }}<small>{{ course.location || '地点未填写' }}</small></span></li></ul><p v-else class="empty-copy">今天没有课程安排。</p></article>
+          <article class="today-card"><div class="card-head"><p class="card-label">今天要做</p><button class="text-action" @click="openTodos">管理事项</button></div><ul v-if="todayData.todos?.length" class="simple-list"><li v-for="todo in todayData.todos" :key="todo.id"><button class="check-button" @click="finishTodayTodo(todo)" aria-label="完成事项">○</button><span>{{ todo.content }}</span></li></ul><p v-else class="empty-copy">没有标记为今天的待办。</p></article>
+          <article class="today-card deadline-card"><p class="card-label">近期 DDL 与考试</p><ul v-if="todayData.upcoming?.length" class="simple-list"><li v-for="item in todayData.upcoming" :key="item.id"><span><b>{{ item.content }}</b><small>{{ item.due_at }}</small></span><em :class="{ overdue: item.days_left < 0 }">{{ item.status }}</em></li></ul><p v-else class="empty-copy">未来 7 天没有 DDL 或考试。</p></article>
+          <article v-if="todayData.reminders?.length" class="today-card reminders-card"><p class="card-label">需要留意</p><ul class="simple-list"><li v-for="item in todayData.reminders" :key="item.id"><span>{{ item.label }} · {{ item.content }}</span><em>{{ item.due_at }}</em></li></ul></article>
+        </div>
+      </template>
+    </section>
+
+    <!-- ── Inbox：只展示画像判断后值得看的公开通知 ───────────────────────── -->
+    <section v-else-if="activeTab === 'inbox'" class="product-page inbox-page">
+      <div v-if="!authUser" class="product-empty"><h2>先登录，再筛选与你有关的校园通知。</h2><button @click="openAuth('login')">登录</button></div>
+      <template v-else>
+        <header class="today-hero"><div><p class="page-kicker">校园通知雷达</p><h2>与你有关的通知。</h2><p>只采集公开官网信息；每一条都可以回到官方原文核验。</p></div><button class="quiet-action" @click="syncInbox" :disabled="inboxBusy">{{ inboxBusy ? '同步中…' : '同步公开通知' }}</button></header>
+        <div class="profile-strip"><div><b>{{ inboxProfileComplete ? '筛选已启用' : '先完善筛选条件' }}</b><span>{{ inboxProfileComplete ? '通知会按你的身份与关注方向排序。' : '填写学院、学历层次和关注方向，避免收到大量无关内容。' }}</span></div><button class="text-action" @click="openProfile">{{ inboxProfileComplete ? '编辑画像' : '完善画像' }}</button></div>
+        <p v-if="inboxError" class="page-error">{{ inboxError }}</p>
+        <div v-if="inboxEvents.length" class="inbox-list"><article v-for="event in inboxEvents" :key="event.id" class="inbox-event"><div class="event-meta"><span>{{ event.source_name }}</span><time>{{ event.published_at || '最新采集' }}</time></div><h3>{{ event.title }}</h3><p>{{ event.summary || '查看官方原文了解详情。' }}</p><div class="event-details"><span v-if="event.deadline">截止 {{ event.deadline }}</span><span v-if="event.reason">为何推荐：{{ event.reason }}</span></div><div class="event-actions"><a :href="event.source_url" target="_blank" rel="noreferrer">查看官方原文</a><button class="text-action" @click="markInbox(event, 'ignored')">忽略</button><button class="text-action" @click="markInbox(event, 'interested')">感兴趣</button><button @click="planFromInbox(event)">加入个人计划</button></div></article></div>
+        <div v-else class="product-empty compact"><h2>{{ inboxBusy ? '正在同步通知…' : '还没有匹配到通知。' }}</h2><p>{{ inboxProfileComplete ? '稍后同步，或调整你的关注方向。' : '先完善画像，再同步公开通知。' }}</p></div>
+      </template>
+    </section>
+
+    <!-- ── Chat：产品的一个交互入口 ──────────────────────────────────────── -->
+    <section v-else class="chat-area" ref="chatArea">
       <!-- 欢迎页（无对话时） -->
       <div v-if="messages.length === 0" class="welcome">
         <div class="welcome-logo">西电</div>
@@ -95,7 +133,7 @@
     </section>
 
     <!-- ── 底部输入区 ──────────────────────────────────────────────────────── -->
-    <footer class="composer-wrap">
+    <footer v-if="activeTab === 'chat'" class="composer-wrap">
       <form class="composer" @submit.prevent="sendMessage">
         <textarea
           v-model="draft"
@@ -259,6 +297,22 @@
       </div>
     </div>
 
+    <!-- ── 学生画像：Inbox 的确定性筛选条件 ─────────────────────────────── -->
+    <div v-if="showProfile" class="modal-mask" @click.self="showProfile = false">
+      <div class="modal profile-modal">
+        <div class="modal-head"><h2>我的通知筛选条件</h2><button class="modal-close" @click="showProfile = false">✕</button></div>
+        <p class="schedule-tip">这些信息只用于在本地筛选公开通知，不会发送给校园网站。</p>
+        <div class="profile-form">
+          <label><span>学院</span><input v-model.trim="studentProfile.college" placeholder="如：计算机科学与技术学院" /></label>
+          <label><span>专业</span><input v-model.trim="studentProfile.major" placeholder="如：软件工程" /></label>
+          <label><span>年级 / 届别</span><input v-model.trim="studentProfile.grade" placeholder="如：2027届" /></label>
+          <label><span>学历层次</span><select v-model="studentProfile.education"><option value="">暂不填写</option><option value="本科生">本科生</option><option value="研究生">研究生</option></select></label>
+          <fieldset><legend>关注方向</legend><label v-for="interest in profileInterests" :key="interest" class="interest-option"><input v-model="studentProfile.interests" type="checkbox" :value="interest" />{{ interest }}</label></fieldset>
+          <p v-if="profileMsg" class="kb-status">{{ profileMsg }}</p><button @click="saveProfile" :disabled="busyData">保存筛选条件</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── 可观测性：Agent 统计 + 告警 + Trace 瀑布 ─────────────────────────── -->
     <div v-if="showObs" class="modal-mask" @click.self="closeObs">
       <div class="modal obs-modal">
@@ -387,6 +441,9 @@ import {
   completeTodo,
   createInitialSettings,
   deleteTodo,
+  getInbox,
+  getStudentProfile,
+  getToday,
   getSchedule,
   getTodos,
   getCurrentUser,
@@ -400,11 +457,16 @@ import {
   requestSearch,
   requestTraceDetail,
   requestTraces,
+  refreshInbox,
+  saveStudentProfile,
   saveSettings,
+  setInboxStatus,
+  addInboxToPlan,
   uploadKnowledge
 } from './lib/backends'
 
 const settings = reactive(createInitialSettings())
+const activeTab = ref('today')
 const messages = ref([])
 const draft = ref('')
 const busy = ref(false)        // 对话请求进行中（发送按钮/typing 指示器）
@@ -454,6 +516,28 @@ const newTodoContent = ref('')
 const newTodoKind = ref('todo')
 const newTodoDue = ref('')
 
+// P0 Today
+const todayData = ref(null)
+const todayBusy = ref(false)
+const todayError = ref('')
+const todayDateLabel = ref('TODAY')
+
+// P1 Inbox 与稳定学生画像
+const inboxEvents = ref([])
+const inboxBusy = ref(false)
+const inboxError = ref('')
+const inboxProfileComplete = ref(false)
+const showProfile = ref(false)
+const profileMsg = ref('')
+const profileInterests = ['保研', '奖学金', '竞赛', '就业', '考研', '出国']
+const studentProfile = reactive({ college: '', major: '', grade: '', education: '', interests: [] })
+const inboxNewCount = computed(() => inboxEvents.value.filter((event) => event.status === 'new').length)
+const todayIntro = computed(() => {
+  if (!todayData.value) return '正在整理你的课表、事项和提醒。'
+  const n = todayData.value.next_course
+  return n ? `下一节是 ${n.start_time} 的 ${n.course}。` : '看看近期安排，把重要的事情安排好。'
+})
+
 // 校园话题推荐（欢迎页卡片）
 const topics = [
   { icon: '📅', title: '我的课表', desc: '今天有什么课？', question: '今天有什么课？' },
@@ -487,6 +571,7 @@ watch(
 onMounted(async () => {
   await restoreSession()
   loadStats()
+  if (authUser.value) loadToday()
 })
 
 async function restoreSession() {
@@ -530,6 +615,7 @@ async function submitAuth() {
     authForm.password = ''
     closeAuth()
     persist()
+    await loadToday()
   } catch (error) {
     authError.value = readableError(error)
   } finally {
@@ -545,6 +631,8 @@ async function doLogout() {
     settings.userId = 'anonymous'
     settings.conversationId = ''
     messages.value = []
+    activeTab.value = 'today'
+    todayData.value = null
     persist()
   }
 }
@@ -562,6 +650,118 @@ function readableError(error) {
     // 保留原始错误
   }
   return raw
+}
+
+// ── P0 Today / Reminder ─────────────────────────────────────────────────────
+
+async function openToday() {
+  activeTab.value = 'today'
+  if (authUser.value) await loadToday()
+}
+
+async function loadToday() {
+  if (!authUser.value) return
+  todayBusy.value = true
+  todayError.value = ''
+  try {
+    todayData.value = await getToday(settings)
+    const date = new Date(`${todayData.value.date}T12:00:00`)
+    todayDateLabel.value = Number.isNaN(date.getTime()) ? todayData.value.date : date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
+  } catch (error) {
+    todayError.value = readableError(error)
+  } finally {
+    todayBusy.value = false
+  }
+}
+
+async function finishTodayTodo(todo) {
+  try {
+    await completeTodo(settings, todo.id, true)
+    await loadToday()
+  } catch (error) {
+    todayError.value = readableError(error)
+  }
+}
+
+// ── P1 Inbox / Profile ─────────────────────────────────────────────────────
+
+async function openInbox() {
+  activeTab.value = 'inbox'
+  if (authUser.value) await loadInbox()
+}
+
+async function loadInbox() {
+  inboxBusy.value = true
+  inboxError.value = ''
+  try {
+    const data = await getInbox(settings)
+    inboxEvents.value = data.events || []
+    inboxProfileComplete.value = Boolean(data.profile_complete)
+  } catch (error) {
+    inboxError.value = readableError(error)
+  } finally {
+    inboxBusy.value = false
+  }
+}
+
+async function syncInbox() {
+  inboxBusy.value = true
+  inboxError.value = ''
+  try {
+    const result = await refreshInbox(settings)
+    if (result.errors?.length) inboxError.value = `部分来源暂不可用：${result.errors.map((item) => item.source).join('、')}`
+    await loadInbox()
+  } catch (error) {
+    inboxError.value = readableError(error)
+    inboxBusy.value = false
+  }
+}
+
+async function markInbox(event, status) {
+  try {
+    await setInboxStatus(settings, event.id, status)
+    await loadInbox()
+  } catch (error) {
+    inboxError.value = readableError(error)
+  }
+}
+
+async function planFromInbox(event) {
+  try {
+    await addInboxToPlan(settings, event.id)
+    await loadInbox()
+    activeTab.value = 'today'
+    await loadToday()
+  } catch (error) {
+    inboxError.value = readableError(error)
+  }
+}
+
+async function openProfile() {
+  if (!authUser.value) return openAuth('login')
+  profileMsg.value = ''
+  try {
+    const profile = await getStudentProfile(settings)
+    Object.assign(studentProfile, { college: '', major: '', grade: '', education: '', interests: [], ...profile })
+    showProfile.value = true
+  } catch (error) {
+    inboxError.value = readableError(error)
+  }
+}
+
+async function saveProfile() {
+  busyData.value = true
+  profileMsg.value = ''
+  try {
+    await saveStudentProfile(settings, studentProfile)
+    profileMsg.value = '已保存，接下来会按这些条件筛选公开通知。'
+    inboxProfileComplete.value = Boolean(studentProfile.education || studentProfile.interests.length)
+    await loadInbox()
+  } catch (error) {
+    profileMsg.value = readableError(error)
+  } finally {
+    busyData.value = false
+  }
 }
 
 // ── Markdown 渲染缓存（流式 delta 每帧全量重渲，用 memo 避免重复计算）────────

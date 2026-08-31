@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime
+import json
 import logging
 import os
 import pathlib
@@ -47,6 +48,16 @@ CREATE TABLE IF NOT EXISTS todos (
     completed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id);
+
+CREATE TABLE IF NOT EXISTS student_profiles (
+    user_id       TEXT PRIMARY KEY,
+    college       TEXT NOT NULL DEFAULT '',
+    major         TEXT NOT NULL DEFAULT '',
+    grade          TEXT NOT NULL DEFAULT '',
+    education     TEXT NOT NULL DEFAULT '',
+    interests_json TEXT NOT NULL DEFAULT '[]',
+    updated_at    TEXT NOT NULL
+);
 """
 
 
@@ -227,6 +238,77 @@ class PersonalStore:
                 "DELETE FROM todos WHERE id = ? AND user_id = ?", (todo_id, user_id)
             )
         return cur.rowcount > 0
+
+    async def update_todo(
+        self, user_id: str, todo_id: int, *, content: Optional[str] = None,
+        kind: Optional[str] = None, due_at: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return await self._run(self._update_todo_sync, user_id, todo_id, content, kind, due_at)
+
+    def _update_todo_sync(
+        self, user_id: str, todo_id: int, content: Optional[str], kind: Optional[str], due_at: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        fields: List[str] = []
+        args: List[Any] = []
+        if content is not None:
+            fields.append("content = ?")
+            args.append(content)
+        if kind is not None:
+            fields.append("kind = ?")
+            args.append(kind)
+        if due_at is not None:
+            fields.append("due_at = ?")
+            args.append(due_at or None)
+        if not fields:
+            return None
+        args.extend([todo_id, user_id])
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"UPDATE todos SET {', '.join(fields)} WHERE id = ? AND user_id = ?", args,
+            )
+            if cur.rowcount == 0:
+                return None
+            row = conn.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
+        return self._todo_row_to_dict(row)
+
+    # ── 稳定学生画像（通知筛选使用，不依赖自由文本 Memory） ────────────────
+
+    async def get_profile(self, user_id: str) -> Dict[str, Any]:
+        return await self._run(self._get_profile_sync, user_id)
+
+    def _get_profile_sync(self, user_id: str) -> Dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM student_profiles WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
+            return {"college": "", "major": "", "grade": "", "education": "", "interests": []}
+        result = dict(row)
+        result["interests"] = json.loads(result.pop("interests_json") or "[]")
+        result.pop("user_id", None)
+        result.pop("updated_at", None)
+        return result
+
+    async def save_profile(self, user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._run(self._save_profile_sync, user_id, profile)
+
+    def _save_profile_sync(self, user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+        clean = {
+            "college": str(profile.get("college", "")).strip(),
+            "major": str(profile.get("major", "")).strip(),
+            "grade": str(profile.get("grade", "")).strip(),
+            "education": str(profile.get("education", "")).strip(),
+            "interests": [str(v).strip() for v in profile.get("interests", []) if str(v).strip()][:12],
+        }
+        updated = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO student_profiles (user_id, college, major, grade, education, interests_json, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET college=excluded.college, major=excluded.major,
+                   grade=excluded.grade, education=excluded.education, interests_json=excluded.interests_json,
+                   updated_at=excluded.updated_at""",
+                (user_id, clean["college"], clean["major"], clean["grade"], clean["education"], json.dumps(clean["interests"], ensure_ascii=False), updated),
+            )
+        return clean
 
     @staticmethod
     def _todo_row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
