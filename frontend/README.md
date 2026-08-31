@@ -1,6 +1,6 @@
-# 西电校园助手（EchoGuide）Frontend
+# XGuide 校园个人 Agent Frontend
 
-独立 Vue 前端项目，可同时连接 EchoGuide Python 版本和 EchoGuide Java 版本，用于校园助手的对话调试与知识库管理。
+独立 Vue 前端项目，承载 XGuide 的 Today、Inbox 与 Chat；后端环境变量为兼容现有部署仍保留 `ECHOGUIDE_*` 前缀。
 
 ## 功能
 

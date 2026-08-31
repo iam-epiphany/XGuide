@@ -5,7 +5,7 @@
       <div class="brand">
         <div class="brand-mark">西电</div>
         <div class="brand-text">
-          <h1>EchoGuide</h1>
+          <h1>XGuide</h1>
           <p>你的校园日程与重要通知</p>
         </div>
       </div>
@@ -285,6 +285,7 @@
                 <strong>{{ t.content }}</strong>
                 <span class="pill">{{ kindLabel(t.kind) }}</span>
                 <small v-if="t.due_at">截止 {{ t.due_at }}</small>
+                <a v-if="t.source_url" class="todo-source" :href="t.source_url" target="_blank" rel="noreferrer">查看来源通知</a>
               </div>
               <div class="todo-actions">
                 <button class="mini" @click="doCompleteTodo(t)">{{ t.done ? '恢复' : '完成' }}</button>

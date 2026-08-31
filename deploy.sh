@@ -8,7 +8,7 @@
 #   2. 在 Git Bash 中运行（本项目开发环境默认就是 Git Bash）
 #   3. 镜像拉取/构建需要联网（首次会下载 chromadb 镜像和 ONNX 模型，较慢）
 #
-# 用法（在项目根目录 D:\Agent-Project\XDU-EchoGuide 下执行）：
+# 用法（在项目根目录 D:\Agent-Project\XGuide 下执行）：
 #   ./deploy.sh           一键部署：检查环境 → 配置 .env → 构建镜像 → 启动 → 健康检查
 #   ./deploy.sh build     只构建镜像
 #   ./deploy.sh start     启动服务

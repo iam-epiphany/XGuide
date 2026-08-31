@@ -1,6 +1,15 @@
-# EchoGuide · 西电校园智慧助手
+# XGuide · 校园个人 Agent
 
-EchoGuide 是面向西安电子科技大学学生的校园 Agent，也是一个自己实现的轻量 **Agent Runtime / Harness**。项目围绕五个工程问题做了比较完整的实现：**分层长程记忆（Working Memory + L0-L3）、级联意图识别、Agentic RAG、Monitor/Trace 可观测、MCP Server**；其他能力（Task-scoped SubAgent、Fast/Deep 双路径、动态 Skills、工具权限、Verifier、DAG 编排、评测）都是支撑这五条主线的二级能力。
+XGuide 面向高校学生，把分散在校园公开网站的通知与自己的课表、待办、DDL、考试放到同一条可执行链路中。它会发现公开通知、按学生画像筛选相关内容、保留官方来源，并将通知中有明确依据的材料与行动转成可管理的个人计划。
+
+它解决的不是“再问一次校园新闻”，而是“今天我该做什么、这条通知和我有什么关系、下一步怎样完成”。P0 Personal Hub 不依赖教务系统；现阶段只使用用户录入/导入的数据与公开校园信息。
+
+```text
+Campus Information → Campus Radar → Structured Campus Event → Personalization
+        → Agent Runtime → Action Plan → Personal Hub (Today / Reminder)
+```
+
+在这个产品闭环之下，XGuide 仍保留自研轻量 **Agent Runtime / Harness**：分层长程记忆（Working Memory + L0-L3）、级联意图识别、Agentic RAG、Monitor/Trace 可观测与 MCP 工具层；Task-scoped SubAgent、Fast/Deep 双路径、动态 Skills、工具权限、Verifier、DAG 编排和评测为上述体验提供工程支撑。
 
 ## 核心架构
 
@@ -177,7 +186,7 @@ Prometheus 指标入口 `/metrics`（只读无认证，指标不含敏感数据�
 
 ### 5. MCP Server
 
-EchoGuide 内部 Tool Registry 通过标准 MCP 接口对外提供服务（Streamable HTTP，tools 子集）：
+XGuide 内部 Tool Registry 通过标准 MCP 接口对外提供服务（Streamable HTTP，tools 子集）：
 
 - `initialize` / `tools/list` / `tools/call`，JSON-RPC 2.0；
 - Tool schema 映射（JSON Schema ↔ MCP inputSchema）；
@@ -372,7 +381,7 @@ python -m api.main
 访问 **http://localhost:8100** —— 同一个端口同时提供前端页面与 `/api/*` 接口
 （后端剥离 `/api` 前缀后转发真实路由，语义与 Vite/nginx 代理一致；无跨域）。
 ChromaDB 无需单独启动：本机无服务时自动降级本地嵌入式持久化
-（`CHROMA_PERSIST_DIRECTORY`，默认 `D:/Agent-Project/XDU-EchoGuide/data/chroma`）。
+（`CHROMA_PERSIST_DIRECTORY`，默认 `D:/Agent-Project/XDU-XGuide/data/chroma`）。
 调试面板：`http://localhost:8100/?debug=1`（展开 Profile / 分类阶段 / 工具 / DAG / Trace ID）。
 
 ### 3. 本地开发模式（前端热更新）

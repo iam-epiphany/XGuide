@@ -7,24 +7,20 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from html.parser import HTMLParser
 import hashlib
+from html.parser import HTMLParser
 import json
-import pathlib
 import re
-import sqlite3
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from campus.adapters import HtmlNoticeAdapter, PublicSourceAdapter, default_public_adapters
+from campus.extractor import CampusEventExtractor
 from personal.store import PersonalStore
 
-SOURCES = [
-    {"name": "西电新闻网", "category": "school", "url": "https://news.xidian.edu.cn/"},
-    {"name": "本科生院", "category": "academic", "url": "https://jwc.xidian.edu.cn/"},
-    {"name": "西电就业信息网", "category": "employment", "url": "https://job.xidian.edu.cn/"},
-]
+# 兼容既有脚本/测试的可读配置；实际同步由 adapters 调度。
+SOURCES = [{"name": adapter.name, "category": adapter.category, "url": adapter.listing_url} for adapter in default_public_adapters()]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS campus_events (
@@ -40,7 +36,16 @@ CREATE TABLE IF NOT EXISTS campus_events (
     deadline TEXT,
     targets_json TEXT NOT NULL DEFAULT '[]',
     actions_json TEXT NOT NULL DEFAULT '[]',
-    fetched_at TEXT NOT NULL
+    requirements_json TEXT NOT NULL DEFAULT '[]',
+    materials_json TEXT NOT NULL DEFAULT '[]',
+    location TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT '通知',
+    content_hash TEXT NOT NULL DEFAULT '',
+    etag TEXT,
+    last_modified TEXT,
+    fetched_at TEXT NOT NULL,
+    last_checked_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_campus_events_published ON campus_events(published_at DESC);
 CREATE TABLE IF NOT EXISTS campus_inbox (
@@ -110,52 +115,80 @@ def _event_fields(title: str, body: str) -> Dict[str, Any]:
 
 
 class CampusRadar:
-    def __init__(self, personal_store: PersonalStore):
+    def __init__(self, personal_store: PersonalStore, *, adapters: Optional[List[PublicSourceAdapter]] = None, extractor: Optional[CampusEventExtractor] = None):
         self.store = personal_store
         self.db_path = personal_store.db_path
+        self.adapters = adapters or default_public_adapters()
+        self.extractor = extractor or CampusEventExtractor()
         with self.store._connect() as conn:
             conn.executescript(_SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(campus_events)")}
+            for name, definition in {"requirements_json": "TEXT NOT NULL DEFAULT '[]'", "materials_json": "TEXT NOT NULL DEFAULT '[]'", "location": "TEXT NOT NULL DEFAULT ''", "event_type": "TEXT NOT NULL DEFAULT '通知'", "content_hash": "TEXT NOT NULL DEFAULT ''", "etag": "TEXT", "last_modified": "TEXT", "last_checked_at": "TEXT", "updated_at": "TEXT"}.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE campus_events ADD COLUMN {name} {definition}")
 
     async def refresh(self) -> Dict[str, Any]:
-        results = await asyncio.gather(*(self._fetch_source(source) for source in SOURCES), return_exceptions=True)
-        inserted, checked, errors = 0, 0, []
-        for source, result in zip(SOURCES, results):
+        results = await asyncio.gather(*(self._refresh_adapter(adapter) for adapter in self.adapters), return_exceptions=True)
+        inserted, updated, unchanged, checked, errors = 0, 0, 0, 0, []
+        for adapter, result in zip(self.adapters, results, strict=False):
             if isinstance(result, Exception):
-                errors.append({"source": source["name"], "message": str(result)[:180]})
+                errors.append({"source": adapter.name, "message": str(result)[:180]})
                 continue
             checked += result["checked"]
-            inserted += await self.store._run(self._save_events_sync, result["events"])
-        return {"sources": len(SOURCES), "checked": checked, "new_events": inserted, "errors": errors}
+            inserted += result["new"]
+            updated += result["updated"]
+            unchanged += result["unchanged"]
+        return {"sources": len(self.adapters), "checked": checked, "new_events": inserted, "updated_events": updated, "unchanged": unchanged, "errors": errors}
+
+    async def _refresh_adapter(self, adapter: PublicSourceAdapter) -> Dict[str, int]:
+        counts = {"checked": 0, "new": 0, "updated": 0, "unchanged": 0}
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers={"User-Agent": "XGuide Campus Radar/1.0 (+public information only)"}) as client:
+            links = await adapter.discover(client)
+            for link in links:
+                counts["checked"] += 1
+                prior = await self.store._run(self._event_sync, link.url)
+                page = await adapter.fetch(client, link, etag=prior.get("etag") if prior else None, last_modified=prior.get("last_modified") if prior else None)
+                if page.not_modified:
+                    await self.store._run(self._touch_checked_sync, link.url)
+                    counts["unchanged"] += 1
+                    continue
+                content_hash = hashlib.sha256(page.body.encode("utf-8")).hexdigest()
+                if prior and prior.get("content_hash") == content_hash:
+                    await self.store._run(self._touch_checked_sync, link.url, page.etag, page.last_modified)
+                    counts["unchanged"] += 1
+                    continue
+                fields = await self.extractor.extract(link.title, page.body)
+                state = await self.store._run(self._upsert_event_sync, {"url": link.url, "title": link.title, "body": page.body, "source_name": link.source_name, "source_category": link.source_category, "etag": page.etag, "last_modified": page.last_modified, "content_hash": content_hash, **fields})
+                counts[state] += 1
+        return counts
+
+    def _event_sync(self, url: str) -> Optional[Dict[str, Any]]:
+        with self.store._connect() as conn:
+            row = conn.execute("SELECT * FROM campus_events WHERE source_url=?", (url,)).fetchone()
+        return dict(row) if row else None
+
+    def _touch_checked_sync(self, url: str, etag: Optional[str] = None, last_modified: Optional[str] = None) -> None:
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        with self.store._connect() as conn:
+            conn.execute("UPDATE campus_events SET last_checked_at=?, etag=COALESCE(?, etag), last_modified=COALESCE(?, last_modified) WHERE source_url=?", (now, etag, last_modified, url))
+
+    def _upsert_event_sync(self, event: Dict[str, Any]) -> str:
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        existing = self._event_sync(event["url"])
+        with self.store._connect() as conn:
+            values = (hashlib.sha256(event["url"].encode()).hexdigest(), event["title"], event["summary"], event["body"], event["source_name"], event["source_category"], event["url"], _date_in(event["body"]) or _date_in(event["title"]), event.get("deadline"), json.dumps(event.get("targets", []), ensure_ascii=False), json.dumps(event.get("actions", []), ensure_ascii=False), json.dumps(event.get("requirements", []), ensure_ascii=False), json.dumps(event.get("materials", []), ensure_ascii=False), event.get("location", ""), event.get("event_type", "通知"), event["content_hash"], event.get("etag"), event.get("last_modified"), now, now, now)
+            conn.execute("""INSERT INTO campus_events (fingerprint,title,summary,body,source_name,source_category,source_url,published_at,deadline,targets_json,actions_json,requirements_json,materials_json,location,event_type,content_hash,etag,last_modified,fetched_at,last_checked_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET title=excluded.title,summary=excluded.summary,body=excluded.body,published_at=excluded.published_at,deadline=excluded.deadline,targets_json=excluded.targets_json,actions_json=excluded.actions_json,requirements_json=excluded.requirements_json,materials_json=excluded.materials_json,location=excluded.location,event_type=excluded.event_type,content_hash=excluded.content_hash,etag=excluded.etag,last_modified=excluded.last_modified,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at""", values)
+        return "updated" if existing else "new"
 
     async def _fetch_source(self, source: Dict[str, str]) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers={"User-Agent": "EchoGuide Campus Radar/1.0 (+public information only)"}) as client:
-            page = (await client.get(source["url"])).text
-            parser = _LinkParser()
-            parser.feed(page)
-            host = urlparse(source["url"]).netloc
-            candidates = []
-            for href, title in parser.links:
-                url = urljoin(source["url"], href)
-                if urlparse(url).netloc != host or url.rstrip("/") == source["url"].rstrip("/") or len(title) < 8 or title in {"更多", "首页", "详情", source["name"]}:
-                    continue
-                if any(skip in url.lower() for skip in ("javascript:", "login", "register")):
-                    continue
-                candidates.append((url, title))
-            unique = list(dict.fromkeys(candidates))[:25]
+        """兼容旧调用方：由通用 Adapter 完成发现与正文读取。"""
+        adapter = HtmlNoticeAdapter(name=source["name"], category=source["category"], listing_url=source["url"])
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers={"User-Agent": "XGuide Campus Radar/1.0 (+public information only)"}) as client:
             events = []
-            for url, title in unique:
-                try:
-                    detail = (await client.get(url)).text
-                    body = _text(detail)[:9000]
-                except httpx.HTTPError:
-                    body = ""
-                fields = _event_fields(title, body)
-                events.append({
-                    "fingerprint": hashlib.sha256(url.encode("utf-8")).hexdigest(), "title": title,
-                    "summary": body[:280], "body": body, "source_name": source["name"],
-                    "source_category": source["category"], "source_url": url,
-                    "published_at": _date_in(body) or _date_in(title), **fields,
-                })
+            for link in await adapter.discover(client):
+                page = await adapter.fetch(client, link)
+                fields = await self.extractor.extract(link.title, page.body)
+                events.append({"fingerprint": hashlib.sha256(link.url.encode("utf-8")).hexdigest(), "title": link.title, "body": page.body, "source_name": link.source_name, "source_category": link.source_category, "source_url": link.url, "published_at": _date_in(page.body) or _date_in(link.title), **fields})
         return {"checked": len(events), "events": events}
 
     def _save_events_sync(self, events: List[Dict[str, Any]]) -> int:
@@ -165,9 +198,9 @@ class CampusRadar:
             for event in events:
                 cur = conn.execute(
                     """INSERT OR IGNORE INTO campus_events
-                    (fingerprint,title,summary,body,source_name,source_category,source_url,published_at,deadline,targets_json,actions_json,fetched_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (event["fingerprint"], event["title"], event["summary"], event["body"], event["source_name"], event["source_category"], event["source_url"], event["published_at"], event["deadline"], json.dumps(event["targets"], ensure_ascii=False), json.dumps(event["actions"], ensure_ascii=False), now),
+                    (fingerprint,title,summary,body,source_name,source_category,source_url,published_at,deadline,targets_json,actions_json,fetched_at,last_checked_at,updated_at,content_hash)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (event["fingerprint"], event["title"], event["summary"], event["body"], event["source_name"], event["source_category"], event["source_url"], event["published_at"], event["deadline"], json.dumps(event["targets"], ensure_ascii=False), json.dumps(event["actions"], ensure_ascii=False), now, now, now, hashlib.sha256(event["body"].encode()).hexdigest()),
                 )
                 inserted += cur.rowcount
         return inserted
@@ -199,24 +232,37 @@ class CampusRadar:
         for event in result:
             event["targets"] = json.loads(event.pop("targets_json") or "[]")
             event["actions"] = json.loads(event.pop("actions_json") or "[]")
+            event["requirements"] = json.loads(event.pop("requirements_json") or "[]")
+            event["materials"] = json.loads(event.pop("materials_json") or "[]")
             event.pop("body", None)
         return result
+
+    async def relevant_events(self, user_id: str, profile: Dict[str, Any], query: str = "", limit: int = 8) -> List[Dict[str, Any]]:
+        events = await self.inbox(user_id, profile, "active")
+        query = query.strip().lower()
+        if query:
+            events = [event for event in events if query in f"{event['title']} {event['summary']} {event.get('event_type', '')}".lower()]
+        return events[:max(1, min(limit, 20))]
 
     @staticmethod
     def _relevance(event: Dict[str, Any], profile: Dict[str, Any]) -> tuple[int, str]:
         text = f"{event['title']} {event['summary']}"
         score, reasons = 0, []
         if event["source_category"] == "employment" and ("就业" in profile.get("interests", []) or profile.get("grade", "").endswith("届")):
-            score += 3; reasons.append("你关注就业")
+            score += 3
+            reasons.append("你关注就业")
         mapping = {"奖学金": ("奖学金", "评优", "资助"), "竞赛": ("竞赛", "比赛", "挑战杯"), "保研": ("推免", "保研"), "就业": ("就业", "招聘", "实习", "选调"), "考研": ("考研", "招生", "调剂"), "出国": ("出国", "留学", "交流")}
         for interest in profile.get("interests", []):
             if any(word in text for word in mapping.get(interest, (interest,))):
-                score += 3; reasons.append(f"你关注{interest}")
+                score += 3
+                reasons.append(f"你关注{interest}")
         targets = json.loads(event.get("targets_json") or "[]")
         if profile.get("education") and profile["education"] in targets:
-            score += 2; reasons.append(f"面向{profile['education']}")
+            score += 2
+            reasons.append(f"面向{profile['education']}")
         if profile.get("college") and profile["college"] in text:
-            score += 4; reasons.append("面向你的学院")
+            score += 4
+            reasons.append("面向你的学院")
         if any(word in text for word in ("截止", "报名", "申请", "提交")):
             score += 1
         return score, "；".join(dict.fromkeys(reasons)) or "包含需要关注的报名或申请事项"
@@ -235,4 +281,35 @@ class CampusRadar:
     def _get_event_sync(self, event_id: int) -> Optional[Dict[str, Any]]:
         with self.store._connect() as conn:
             row = conn.execute("SELECT * FROM campus_events WHERE id=?", (event_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        event = dict(row)
+        for key in ("targets", "actions", "requirements", "materials"):
+            event[key] = json.loads(event.pop(f"{key}_json") or "[]")
+        return event
+
+    async def create_action_plan(self, user_id: str, event_id: int, personal_service: Any) -> Dict[str, Any]:
+        """仅把 Event 中已有的 actions/materials 转为个人事项，绝不补造步骤。"""
+        event = await self.get_event(event_id)
+        if not event:
+            raise ValueError("通知不存在")
+        import uuid
+        plan_id = uuid.uuid4().hex[:12]
+        steps: List[str] = []
+        for material in event["materials"]:
+            steps.append(material if material.startswith(("准备", "整理", "获取")) else f"准备{material}")
+        steps.extend(event["actions"])
+        steps = list(dict.fromkeys(step for step in steps if step))
+        if not steps:
+            steps = [event["title"]]
+        items = []
+        for index, step in enumerate(steps):
+            is_final = index == len(steps) - 1
+            item = await personal_service.add_todo(
+                user_id, step, kind="ddl" if is_final and event.get("deadline") else "todo",
+                due_at=event.get("deadline") if is_final else None,
+                source_event_id=event_id, source_url=event["source_url"], source_deadline=event.get("deadline"), action_plan_id=plan_id,
+            )
+            items.append(item)
+        await self.set_status(user_id, event_id, "interested")
+        return {"plan_id": plan_id, "event": event, "items": items, "evidence_limited": not bool(event["materials"] or event["actions"])}

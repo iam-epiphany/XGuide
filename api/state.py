@@ -131,8 +131,9 @@ def _build_runtime() -> None:
     global _personal_service, _campus_store, _campus_radar, _kb, _semantic_cache
 
     from agents.agent_orchestrator import AgentOrchestrator
-    from campus.store import CampusInfoStore
+    from campus.extractor import CampusEventExtractor
     from campus.radar import CampusRadar
+    from campus.store import CampusInfoStore
     from core.skill_loader import SkillManager
     from evaluation.evaluator import EndToEndEvaluator
     from mcp.knowledge_base import KnowledgeBase
@@ -147,11 +148,22 @@ def _build_runtime() -> None:
     from tools import with_service
     from tools.academic_tool import calculate_weighted_score_handler
     from tools.affairs_tool import query_affairs_process_handler
+    from tools.campus_event_tool import (
+        create_action_plan_handler,
+        get_campus_event_handler,
+        query_campus_events_handler,
+    )
     from tools.campus_tool import campus_info_handler
     from tools.ddl_tool import query_ddl_handler
     from tools.it_tool import diagnose_it_issue_handler
     from tools.schedule_tool import query_free_time_handler, query_schedule_handler
-    from tools.todo_tool import add_todo_handler, complete_todo_handler, delete_todo_handler, query_todo_handler, update_todo_handler
+    from tools.todo_tool import (
+        add_todo_handler,
+        complete_todo_handler,
+        delete_todo_handler,
+        query_todo_handler,
+        update_todo_handler,
+    )
     from tools.weather import weather_handler
 
     cfg = _anthropic_cfg()
@@ -310,7 +322,7 @@ def _build_runtime() -> None:
     # ── 个人数据中心（课表 / 待办 / DDL，按 user_id 隔离，SQLite 持久化）──
     _personal_service = PersonalService(PersonalStore())
     logger.info("个人数据中心已就绪: %s", _personal_service.store.db_path)
-    _campus_radar = CampusRadar(_personal_service.store)
+    _campus_radar = CampusRadar(_personal_service.store, extractor=CampusEventExtractor(client=_tool_manager._client, model=_tool_manager._model, gateway=_gateway))
     logger.info("校园通知雷达已就绪（公开源 %s 个）", 3)
 
     _tool_manager.register(Tool(
@@ -404,6 +416,24 @@ def _build_runtime() -> None:
         },
         cache_ttl=0.0,
         effect=ToolEffect.READ,
+    ))
+    _tool_manager.register(Tool(
+        name="query_campus_events",
+        description="查询与当前用户画像相关的校园公开通知；可按 query 过滤竞赛、奖学金、就业等，返回通知 id、截止、要求、材料、行动和官方来源。",
+        handler=with_service(query_campus_events_handler, campus_radar=_campus_radar, personal_service=_personal_service),
+        schema={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}}, cache_ttl=0.0, effect=ToolEffect.READ,
+    ))
+    _tool_manager.register(Tool(
+        name="get_campus_event",
+        description="按通知 id 读取 Campus Event 详情，包括截止、要求、材料、行动与官方来源。",
+        handler=with_service(get_campus_event_handler, campus_radar=_campus_radar),
+        schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}, cache_ttl=0.0, effect=ToolEffect.READ,
+    ))
+    _tool_manager.register(Tool(
+        name="create_action_plan",
+        description="依据某条 Campus Event 中明确列出的材料和行动生成可追溯个人行动计划；不会编造通知未提供的步骤。",
+        handler=with_service(create_action_plan_handler, campus_radar=_campus_radar, personal_service=_personal_service),
+        schema={"type": "object", "properties": {"event_id": {"type": "integer"}}, "required": ["event_id"]}, cache_ttl=0.0, effect=ToolEffect.WRITE,
     ))
 
     # ── 结构化公开信息（校车/楼宇/场馆/图书馆，data/public/*.json）──

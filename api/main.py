@@ -1,5 +1,5 @@
 """
-西电校园智慧助手（EchoGuide）— FastAPI 入口（收口）
+XGuide 校园个人 Agent — FastAPI 入口（收口）
 
 职责只保留四件事：
   1. app 组装（CORS / EchoGuard / 同源托管中间件）
@@ -68,8 +68,8 @@ search = chat_router.search
 BANNER = r"""
     ʕ•ᴥ•ʔ  ʕ•ᴥ•ʔ  ʕ•ᴥ•ʔ
    ╔══════════════════════╗
-   ║  EchoGuide  v4       ║
-   ║  西电校园智慧助手     ║
+   ║  XGuide  v5          ║
+   ║  校园个人 Agent      ║
    ╚══════════════════════╝
     ʕ•ᴥ•ʔ  ʕ•ᴥ•ʔ  ʕ•ᴥ•ʔ
 """
@@ -105,18 +105,18 @@ async def lifespan(app: FastAPI):
     _monitor = state._monitor
     _memory = state._memory
 
-    logger.info("EchoGuide 西电校园智慧助手已就绪")
+    logger.info("XGuide 校园个人 Agent 已就绪")
     yield
 
     await state._monitor.stop()
     if state._memory is not None:
         await state._memory.close()
-    logger.info("EchoGuide 已关闭")
+    logger.info("XGuide 已关闭")
 
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="西电校园智慧助手 EchoGuide",
+    title="XGuide · 校园个人 Agent",
     version="4.0.0",
     lifespan=lifespan,
     docs_url="/docs" if os.getenv("ENABLE_SWAGGER_UI", "true").lower() == "true" else None,
@@ -229,7 +229,7 @@ async def change_password(body: PasswordChange, user=Depends(require_user)):
 # ── 交互式 CLI ────────────────────────────────────────────────────────────────
 async def _cli():
     print(BANNER)
-    print("EchoGuide CLI — 输入 quit 退出\n")
+    print("XGuide CLI — 输入 quit 退出\n")
 
     from agents.agent_orchestrator import Request
     from memory.conversation_memory import MsgRole
@@ -262,7 +262,7 @@ async def _cli():
         await mem.add_message(user_id, conv_id, MsgRole.USER, msg)
         await mem.add_message(user_id, conv_id, MsgRole.ASSISTANT, result.response)
 
-        print(f"\nEchoGuide [{result.agent_type}]: {result.response}\n")
+        print(f"\nXGuide [{result.agent_type}]: {result.response}\n")
 
 
 # ── 同源托管：单端口同时提供前端页面与 API（本地/单进程模式）──────────────────

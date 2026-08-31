@@ -912,6 +912,8 @@ label {
   font-size: 12px;
 }
 
+.todo-source { color: var(--xdu-navy); font-size: 12px; font-weight: 700; }
+
 .todo-actions {
   display: flex;
   gap: 6px;

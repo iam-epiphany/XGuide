@@ -1,7 +1,7 @@
 [project]
-name = "echoguide"
+name = "xguide"
 version = "0.1.0"
-description = "西电校园智慧助手 - Agent Runtime / Harness"
+description = "校园个人 Agent - Agent Runtime / Harness"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.109.0",

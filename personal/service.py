@@ -233,8 +233,9 @@ class PersonalService:
         content: str,
         kind: str = "todo",
         due_at: Optional[str] = None,
+        **provenance: Any,
     ) -> Dict[str, Any]:
-        return await self.store.add_todo(user_id, content, kind, due_at)
+        return await self.store.add_todo(user_id, content, kind, due_at, **provenance)
 
     async def complete_todo(self, user_id: str, todo_id: int, done: bool = True) -> Optional[Dict[str, Any]]:
         ok = await self.store.set_todo_done(user_id, todo_id, done)

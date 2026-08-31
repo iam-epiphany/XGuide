@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from datetime import date
 
+from campus.adapters import NoticeLink, NoticePage, PublicSourceAdapter
 from campus.radar import CampusRadar
+from mcp.tool_manager import MCPToolManager, Tool, ToolEffect
 from personal.service import PersonalService
 from personal.store import PersonalStore
+from tools import with_service
+from tools.campus_event_tool import get_campus_event_handler, query_campus_events_handler
 
 
 def test_free_time_today_and_editable_todo(tmp_path):
@@ -48,3 +51,73 @@ def test_profile_filters_public_event_and_keeps_source(tmp_path):
     assert inbox[0]["deadline"] == "2026-09-15"
     assert "奖学金" in inbox[0]["reason"]
     assert asyncio.run(radar.set_status("u", inbox[0]["id"], "interested")) is True
+
+
+class _FakeAdapter(PublicSourceAdapter):
+    name, category = "测试本科生院", "academic"
+
+    def __init__(self):
+        self.body = "本科生国家奖学金申请，截止 2026年9月15日。"
+
+    async def discover(self, client):
+        return [NoticeLink("https://notice.example/1", "国家奖学金申请", self.name, self.category)]
+
+    async def fetch(self, client, link, *, etag=None, last_modified=None):
+        return NoticePage(link, self.body, "v1", None)
+
+
+class _EvidenceExtractor:
+    async def extract(self, title, body):
+        return {
+            "event_type": "奖学金", "summary": body, "deadline": "2026-09-15", "targets": ["本科生"],
+            "requirements": ["本科生"], "materials": ["成绩证明", "获奖材料"],
+            "actions": ["填写申请表", "提交申请"], "location": "学生工作处", "extraction": "test",
+        }
+
+
+def test_incremental_event_sync_and_action_plan_provenance(tmp_path):
+    store = PersonalStore(str(tmp_path / "incremental.db"))
+    adapter = _FakeAdapter()
+    radar = CampusRadar(store, adapters=[adapter], extractor=_EvidenceExtractor())
+    first = asyncio.run(radar.refresh())
+    assert first["new_events"] == 1
+    second = asyncio.run(radar.refresh())
+    assert second["unchanged"] == 1
+    adapter.body = "本科生国家奖学金申请，截止 2026年9月20日。请准备成绩证明和获奖材料。"
+    changed = asyncio.run(radar.refresh())
+    assert changed["updated_events"] == 1
+
+    profile = asyncio.run(store.save_profile("u", {"education": "本科生", "interests": ["奖学金"]}))
+    event = asyncio.run(radar.inbox("u", profile))[0]
+    personal = PersonalService(store)
+    plan = asyncio.run(radar.create_action_plan("u", event["id"], personal))
+    assert [item["content"] for item in plan["items"]] == ["准备成绩证明", "准备获奖材料", "填写申请表", "提交申请"]
+    assert plan["items"][-1]["due_at"] == "2026-09-15"
+    assert all(item["source_event_id"] == event["id"] for item in plan["items"])
+    assert all(item["source_url"] == "https://notice.example/1" for item in plan["items"])
+
+
+def test_agent_tool_reads_same_event_store_as_inbox(tmp_path):
+    store = PersonalStore(str(tmp_path / "tool.db"))
+    radar = CampusRadar(store, adapters=[_FakeAdapter()], extractor=_EvidenceExtractor())
+    asyncio.run(radar.refresh())
+    personal = PersonalService(store)
+    asyncio.run(store.save_profile("u", {"education": "本科生", "interests": ["奖学金"]}))
+    manager = MCPToolManager(api_key="test", model="test")
+    manager.register(Tool(
+        name="query_campus_events", effect=ToolEffect.READ, cache_ttl=0,
+        description="test", schema={"type": "object"},
+        handler=with_service(query_campus_events_handler, campus_radar=radar, personal_service=personal),
+    ))
+    manager.register(Tool(
+        name="get_campus_event", effect=ToolEffect.READ, cache_ttl=0,
+        description="test", schema={"type": "object"},
+        handler=with_service(get_campus_event_handler, campus_radar=radar),
+    ))
+    result = asyncio.run(manager.call("query_campus_events", {"query": "奖学金"}, {"user_id": "u"}))
+    assert result.success
+    assert result.data["events"][0]["title"] == "国家奖学金申请"
+    event_id = result.data["events"][0]["id"]
+    detail = asyncio.run(manager.call("get_campus_event", {"id": event_id}, {"user_id": "u"}))
+    assert detail.success
+    assert detail.data["event"]["source_url"] == "https://notice.example/1"

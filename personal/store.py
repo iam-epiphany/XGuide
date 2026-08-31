@@ -45,7 +45,11 @@ CREATE TABLE IF NOT EXISTS todos (
     due_at       TEXT,                          -- "YYYY-MM-DD" 或 "YYYY-MM-DD HH:MM"
     done         INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    source_event_id INTEGER,
+    source_url TEXT,
+    source_deadline TEXT,
+    action_plan_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id);
 
@@ -84,6 +88,14 @@ class PersonalStore:
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            # 兼容 P0 已部署的数据库：CREATE TABLE 不会为既有表补列。
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(todos)")}
+            for name, definition in {
+                "source_event_id": "INTEGER", "source_url": "TEXT",
+                "source_deadline": "TEXT", "action_plan_id": "TEXT",
+            }.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE todos ADD COLUMN {name} {definition}")
 
     async def _run(self, fn, *args, **kwargs):
         """同步实现包装为异步，避免阻塞事件循环。"""
@@ -153,18 +165,22 @@ class PersonalStore:
         content: str,
         kind: str = "todo",
         due_at: Optional[str] = None,
+        source_event_id: Optional[int] = None,
+        source_url: Optional[str] = None,
+        source_deadline: Optional[str] = None,
+        action_plan_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return await self._run(self._add_todo_sync, user_id, content, kind, due_at)
+        return await self._run(self._add_todo_sync, user_id, content, kind, due_at, source_event_id, source_url, source_deadline, action_plan_id)
 
     def _add_todo_sync(
-        self, user_id: str, content: str, kind: str, due_at: Optional[str]
+        self, user_id: str, content: str, kind: str, due_at: Optional[str], source_event_id: Optional[int], source_url: Optional[str], source_deadline: Optional[str], action_plan_id: Optional[str],
     ) -> Dict[str, Any]:
         created = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._connect() as conn:
             cur = conn.execute(
-                """INSERT INTO todos (user_id, content, kind, due_at, created_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (user_id, content, kind, due_at or None, created),
+                """INSERT INTO todos (user_id, content, kind, due_at, created_at, source_event_id, source_url, source_deadline, action_plan_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, content, kind, due_at or None, created, source_event_id, source_url, source_deadline, action_plan_id),
             )
             return self._todo_row_to_dict(
                 conn.execute(

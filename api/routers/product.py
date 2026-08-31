@@ -101,9 +101,8 @@ async def set_inbox_status(event_id: int, body: InboxStatusBody, user=Depends(re
 
 @router.post("/inbox/{event_id}/add-to-plan")
 async def add_event_to_plan(event_id: int, user=Depends(require_user)):
-    event = await _radar().get_event(event_id)
-    if not event:
-        raise HTTPException(404, "通知不存在")
-    todo = await _personal().add_todo(user.id, event["title"], kind="ddl" if event.get("deadline") else "todo", due_at=event.get("deadline"))
-    await _radar().set_status(user.id, event_id, "interested")
-    return {"message": "已加入个人计划", "todo": todo}
+    try:
+        plan = await _radar().create_action_plan(user.id, event_id, _personal())
+    except ValueError as ex:
+        raise HTTPException(404, str(ex)) from ex
+    return {"message": "已生成个人行动计划", "plan": plan}

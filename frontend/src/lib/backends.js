@@ -1,5 +1,5 @@
 const DEFAULT_BACKEND = {
-  id: 'echoguide', label: 'EchoGuide Python',
+  id: 'echoguide', label: 'XGuide API',
   baseUrl: import.meta.env.VITE_API_URL || '/api'
 }
 
