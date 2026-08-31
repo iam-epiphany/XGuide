@@ -1,98 +1,55 @@
-# XGuide 校园个人 Agent Frontend
+# XGuide 前端
 
-独立 Vue 前端项目，承载 XGuide 的 Today、Inbox 与 Chat；后端环境变量为兼容现有部署仍保留 `ECHOGUIDE_*` 前缀。
+Vue 3 + Vite 单页应用，是 XGuide 校园个人 Agent 的学生端。前端只连接一个 XGuide FastAPI 后端，不再提供 Java/Python 双后端切换。
 
-## 功能
+## 页面与能力
 
-- 在页面中切换 Java / Python 后端。
-- 统一适配 `/chat` 响应字段：
-  - Python：`conv_id`、`agent_type`、`latency_ms`
-  - Java：`conversation_id`、`agent_type`、`latency_ms`
-- 支持聊天调试、健康检查、监控摘要、知识库检索、知识库文档导入、文件上传。
-- 支持 Docker + Nginx 部署。
+| 页面 | 用途 | 依赖接口 |
+|---|---|---|
+| **Today** | 汇总下一节课、今日事项、未来 7 天 DDL/考试和紧急提醒 | `/personal/today`、`/personal/reminders` |
+| **Inbox** | 同步并查看经学生画像筛选的公开校园通知；可查看原文、标记状态、加入个人计划 | `/inbox/*`、`/student-profile` |
+| **Chat** | 流式对话、知识检索、执行详情与 Trace 调试 | `/chat/stream`、`/search`、`/traces/*` |
+| **个人数据弹窗** | 导入课表、维护待办/DDL/考试、修改通知筛选条件 | `/personal/schedule/*`、`/personal/todo/*`、`/student-profile` |
 
-## 默认后端地址
+所有个人数据均由后端根据登录 Cookie 隔离。学生画像只在 XGuide 本地用于 Inbox 排序，不会随通知同步请求发送到外部校园网站。
 
-| 后端 | 默认地址 |
-|------|----------|
-| Python | `http://localhost:8100` |
-| Java | `http://localhost:8080` |
+## 开发运行
 
-开发模式下，Vite 会代理：
+要求 Node.js 20+（项目当前锁定 npm 依赖）。先在仓库根目录启动后端和 Redis；后端默认监听 `8100`。
 
-| 前端路径 | 代理到 |
-|----------|--------|
-| `/api/python` | `http://localhost:8100` |
-| `/api/java` | `http://localhost:8080` |
+```powershell
+Set-Location 'D:\Agent-Project\XGuide'
+$env:ECHOGUIDE_SERVE_STATIC='0'
+.\.venv\Scripts\python.exe -m api.main
+```
 
-Docker Compose 模式下，Nginx 在容器网络内转发到 EchoGuide 后端服务（`echoguide:8000`，见仓库根目录 `docker-compose.yml`），无需直连宿主机。
+另开一个 PowerShell 启动 Vite：
 
-## 本地运行
-
-安装依赖：
-
-```bash
+```powershell
+Set-Location 'D:\Agent-Project\XGuide\frontend'
 npm install
-```
-
-启动：
-
-```bash
+$env:VITE_PYTHON_API_URL='http://localhost:8100'
 npm run dev
 ```
 
-访问：
+访问 `http://localhost:5175`。开发服务器会将 `/api/*` 请求代理到 `VITE_PYTHON_API_URL`；未设置时默认代理到 `http://localhost:8100`。
 
-```text
-http://localhost:5175
+常用命令：
+
+```powershell
+npm run build       # 生成 dist/ 静态资源
+npm run demo:capture # 运行 Playwright 演示截图脚本
 ```
 
-如果后端端口不是默认值，可以启动时覆盖：
+## 部署
 
-```bash
-VITE_PYTHON_API_URL=http://localhost:8100 \
-VITE_JAVA_API_URL=http://localhost:8080 \
-npm run dev
-```
+完整部署应从仓库根目录执行：
 
-## Docker 部署
-
-镜像内已包含前端构建（Dockerfile 多阶段构建），无需预先执行 `npm run build`。
-
-仅部署前端容器（挂到仓库根目录 `docker-compose.yml` 的主栈网络上，
-nginx 的 `echoguide:8000` upstream 才能解析到主栈后端）：
-
-```bash
+```powershell
+Set-Location 'D:\Agent-Project\XGuide'
 docker compose up -d --build
 ```
 
-访问：
+Nginx 提供前端并把 `/api/*` 转发给容器内的 XGuide 服务，统一入口为 `http://localhost:8088`。后端 Swagger 为 `http://localhost:8100/docs`（Docker Compose 也会映射该端口）。
 
-```text
-http://localhost:5175
-```
-
-停止：
-
-```bash
-docker compose down
-```
-
-完整部署（后端 + Redis + ChromaDB + Prometheus + Nginx 统一入口）见仓库根目录
-`docker-compose.yml`，统一入口为 `http://localhost:8088`。
-
-## 后端启动参考
-
-Python 版默认：
-
-```text
-http://localhost:8100
-```
-
-Java 版默认：
-
-```text
-http://localhost:8080
-```
-
-两个后端不需要同时启动。前端页面里选择当前要调试的后端即可。
+无需单独运行 `frontend/docker-compose.yml`；它不是当前完整产品栈的推荐入口。

@@ -1,6 +1,6 @@
-# EchoGuide 技术架构图
+# XGuide 技术架构图
 
-本文档包含 EchoGuide 系统的核心架构设计图，展示各组件之间的关系和数据流向。
+本文档包含 XGuide 校园个人 Agent 的核心架构设计图，展示产品闭环与 Agent Runtime 的关系。产品层以 Today、Inbox、Chat 为入口；Runtime 负责对话和工具链的执行控制。
 
 ## 目录
 
@@ -10,6 +10,7 @@
 4. [Agentic RAG 架构](#agentic-rag-架构)
 5. [执行时 Runtime 架构](#执行时-runtime-架构)
 6. [MCP Server 架构](#mcp-server-架构)
+7. [Campus Radar 与行动计划](#campus-radar-与行动计划)
 
 ---
 
@@ -18,7 +19,9 @@
 ```mermaid
 flowchart TB
     subgraph "前端层"
-        UI[Vue3 学生界面]
+        UI[Vue 3 学生界面]
+        Today[Today\n课程/待办/提醒]
+        Inbox[Inbox\n个性化公开通知]
         Chat[对话交互]
         Monitor[监控面板]
     end
@@ -26,6 +29,7 @@ flowchart TB
     subgraph "API 层 (FastAPI)"
         ChatAPI[/chat, /chat/stream]
         PersonalAPI[/personal/*]
+        ProductAPI[/student-profile, /inbox/*]
         KnowledgeAPI[/knowledge/*]
         MonitorAPI[/monitor, /metrics]
         MCPAPI[/mcp]
@@ -72,10 +76,15 @@ flowchart TB
     end
 
     UI --> ChatAPI
+    UI --> Today
+    UI --> Inbox
+    Today --> PersonalAPI
+    Inbox --> ProductAPI
     Monitor --> MonitorAPI
 
     ChatAPI --> Orchestrator
     PersonalAPI --> PersonalTools
+    ProductAPI --> Radar
     KnowledgeAPI --> KB
     MCPAPI --> Tools
     AuthAPI --> SystemAPI
@@ -105,12 +114,47 @@ flowchart TB
 
     CampusTools --> QWeather
 
+    subgraph "Campus Radar"
+        Radar[公开通知同步/相关性排序]
+        Adapters[公开站点 Adapter]
+        Extractor[事件结构化提取\n规则兜底 + 可选 LLM]
+    end
+
+    Adapters --> Radar
+    Radar --> Extractor
+    Extractor --> SQLite
+    Radar --> PersonalTools
+
     style Orchestrator fill:#e1f5ff
     style TaskAgent fill:#fff4e1
     style Intent fill:#e8f5e9
     style Planner fill:#f3e5f5
     style Profile fill:#fce4ec
 ```
+
+---
+
+## Campus Radar 与行动计划
+
+```mermaid
+flowchart LR
+    Source[公开校园网站] --> Adapter[PublicSourceAdapter\n发现列表与读取正文]
+    Adapter --> Cache[ETag / Last-Modified\n内容哈希去重]
+    Cache --> Extract[CampusEventExtractor\n规则兜底 + 可选 LLM]
+    Extract --> Events[(SQLite campus_events\n来源链接与结构化证据)]
+    Profile[(稳定学生画像)] --> Rank[相关性排序]
+    Events --> Rank
+    Rank --> Inbox[个人 Inbox]
+    Inbox -->|感兴趣/加入计划| Plan[Action Plan]
+    Plan --> Todos[(个人待办/DDL)]
+    Todos --> Today[Today]
+
+    Note[只访问无需登录的公开页面\n画像不发送到外部网站\n行动仅来自原文已提取证据] -.-> Adapter
+```
+
+Campus Radar 将“采集”与“个性化”分开：Adapter 只知道公开来源和网页结构；事件提取只从原文取得截止日期、材料、动作等字段；本地画像只在事件落库后参与 Inbox 排序。来源不可用时，该来源会出现在同步错误结果中，但既有 Inbox、Today 与个人数据仍可用。
+
+行动计划不会生成未出现在原文中的条件或步骤：提取到的材料先转为准备事项，动作随后转为待办，最后一个带截止日期的步骤转为 DDL；若原文没有可用行动，仅创建通知标题的保守事项，并在响应中标示证据有限。
 
 ---
 
@@ -132,7 +176,7 @@ flowchart LR
 
     DAG --> Deep
 
-    Fast --> TaskAgent[TaskAgent<br/>READ_ONLY]
+    Fast --> TaskAgent[TaskAgent<br/>按 action 应用读写策略]
     Deep --> TaskAgent
 
     TaskAgent --> Tools[工具层]
@@ -149,7 +193,7 @@ flowchart LR
 **核心设计原则：**
 
 - **级联意图识别**：Pattern 匹配优先，LLM 兜底，双确认机制
-- **最小权限原则**：Fast 路径只读，Deep 路径允许写操作
+- **最小权限原则**：任务的 action 与 `allowed_tools` 决定读写权限；模型 Profile 不绕过权限门禁
 - **成本控制**：Fast 路径无思考模式，Token 预算 768
 - **复杂任务路由**：多任务依赖时自动升级 Deep
 
@@ -420,7 +464,7 @@ flowchart TB
 
 ## 总结
 
-EchoGuide 的核心架构优势：
+XGuide 的核心架构优势：
 
 1. **分层长程记忆**：L0-L3 四层记忆，证据链完整溯源
 2. **Fast/Deep 双路径**：成本与质量的最优平衡

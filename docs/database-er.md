@@ -1,11 +1,11 @@
-# EchoGuide 数据库 ER 图
+# XGuide 数据库 ER 图
 
-本文档展示 EchoGuide 系统中所有数据库的实体关系设计，包括关系型数据库和向量数据库。
+本文档展示 XGuide 系统中所有数据库的实体关系设计，包括个人数据、Campus Radar、分层记忆和向量数据库。
 
 ## 目录
 
 1. [数据存储架构概览](#数据存储架构概览)
-2. [个人数据中心 (echoguide.db)](#个人数据中心-echoguidedb)
+2. [个人数据中心与 Campus Radar (echoguide.db)](#个人数据中心与-campus-radar-echoguidedb)
 3. [分层长程记忆 (memory.db)](#分层长程记忆-memorydb)
 4. [ChromaDB 向量数据库](#chromadb-向量数据库)
 5. [数据流向与关联关系](#数据流向与关联关系)
@@ -21,6 +21,9 @@ graph TB
         Users[users]
         Schedule[schedule]
         Todos[todos]
+        StudentProfiles[student_profiles]
+        CampusEvents[campus_events]
+        CampusInbox[campus_inbox]
     end
 
     subgraph "分层记忆系统"
@@ -46,6 +49,9 @@ graph TB
     echoguide --> Users
     echoguide --> Schedule
     echoguide --> Todos
+    echoguide --> StudentProfiles
+    echoguide --> CampusEvents
+    echoguide --> CampusInbox
 
     memory --> RawMessages
     memory --> Facts
@@ -74,7 +80,7 @@ graph TB
 
 ---
 
-## 个人数据中心 (echoguide.db)
+## 个人数据中心与 Campus Radar (echoguide.db)
 
 个人数据中心存储用户认证信息和个人数据，全部按 `user_id` 隔离。
 
@@ -84,6 +90,10 @@ graph TB
 erDiagram
     users ||--o{ schedule : owns
     users ||--o{ todos : owns
+    users ||--|| student_profiles : owns
+    users ||--o{ campus_inbox : owns
+    campus_events ||--o{ campus_inbox : appears_in
+    campus_events ||--o{ todos : sources
 
     users {
         INTEGER id PK "AUTOINCREMENT"
@@ -114,6 +124,43 @@ erDiagram
         INTEGER done "0=未完成/1=完成"
         TEXT created_at "创建时间"
         TEXT completed_at "完成时间"
+        INTEGER source_event_id FK "来源通知，可为空"
+        TEXT source_url "来源原文 URL"
+        TEXT source_deadline "原始截止日期"
+        TEXT action_plan_id "同一行动计划标识"
+    }
+
+    student_profiles {
+        TEXT user_id PK "用户标识"
+        TEXT college "学院"
+        TEXT major "专业"
+        TEXT grade "年级/届别"
+        TEXT education "本科生/研究生"
+        TEXT interests_json "关注方向 JSON 数组"
+        TEXT updated_at "更新时间"
+    }
+
+    campus_events {
+        INTEGER id PK "事件 ID"
+        TEXT fingerprint UK "来源 URL 指纹"
+        TEXT title "通知标题"
+        TEXT source_url "官方原文 URL"
+        TEXT deadline "原文提取的截止日期"
+        TEXT requirements_json "条件 JSON 数组"
+        TEXT materials_json "材料 JSON 数组"
+        TEXT actions_json "动作 JSON 数组"
+        TEXT content_hash "正文内容哈希"
+        TEXT etag "HTTP ETag"
+        TEXT last_modified "HTTP Last-Modified"
+    }
+
+    campus_inbox {
+        TEXT user_id PK "用户标识（联合主键）"
+        INTEGER event_id PK "事件 ID（联合主键）"
+        INTEGER relevance "相关性分数"
+        TEXT reason "推荐原因"
+        TEXT status "new/seen/interested/ignored"
+        TEXT updated_at "更新时间"
     }
 
     users {
@@ -170,6 +217,10 @@ erDiagram
 | done | INTEGER | DEFAULT 0 | 0=未完成，1=已完成 |
 | created_at | TEXT | NOT NULL | 创建时间 |
 | completed_at | TEXT | NULL | 完成时间 |
+| source_event_id | INTEGER | NULL | 由 Inbox 行动计划创建时关联的 `campus_events.id` |
+| source_url | TEXT | NULL | 可回到官方原文的来源链接 |
+| source_deadline | TEXT | NULL | 原始通知中的截止日期，避免由系统推测 |
+| action_plan_id | TEXT | NULL | 同一次“加入个人计划”创建事项的分组标识 |
 
 **索引**：
 - `idx_todos_user(user_id)`：按用户查询待办
@@ -178,6 +229,17 @@ erDiagram
 - 支持按状态筛选：open/done/all
 - 支持按类型过滤：todo/ddl/exam
 - 支持标记完成/恢复未完成
+- 行动计划只从已结构化的公开通知生成；用户手工待办不必包含来源字段
+
+#### student_profiles 表（通知筛选条件）
+
+每个用户最多一行。学院、专业、年级、学历层次和关注方向用于**本地** Inbox 相关性排序，不会在对外抓取时发送给校园网站。
+
+#### campus_events 与 campus_inbox 表（公开通知与个人收件箱）
+
+`campus_events` 保存从无需登录的官方页面取得的通知、来源链接和可核验的结构化字段。`fingerprint` 保证同一来源链接不会重复写入；`content_hash`、`etag`、`last_modified` 支持增量同步和条件请求。
+
+`campus_inbox` 是用户与公开事件的关联表，联合主键为 `(user_id, event_id)`。它保存当前相关性分数、推荐原因和用户状态；同一公开事件可出现在多个用户的 Inbox 中，状态彼此隔离。
 
 ---
 
