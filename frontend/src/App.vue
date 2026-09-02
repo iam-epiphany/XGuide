@@ -62,11 +62,23 @@
     <section v-else-if="activeTab === 'inbox'" class="product-page inbox-page">
       <div v-if="!authUser" class="product-empty"><h2>先登录，再筛选与你有关的校园通知。</h2><button @click="openAuth('login')">登录</button></div>
       <template v-else>
-        <header class="today-hero"><div><p class="page-kicker">校园通知雷达</p><h2>与你有关的通知。</h2><p>只采集公开官网信息；每一条都可以回到官方原文核验。</p></div><button class="quiet-action" @click="syncInbox" :disabled="inboxBusy">{{ inboxBusy ? '同步中…' : '同步公开通知' }}</button></header>
-        <div class="profile-strip"><div><b>{{ inboxProfileComplete ? '筛选已启用' : '先完善筛选条件' }}</b><span>{{ inboxProfileComplete ? '通知会按你的身份与关注方向排序。' : '填写学院、学历层次和关注方向，避免收到大量无关内容。' }}</span></div><button class="text-action" @click="openProfile">{{ inboxProfileComplete ? '编辑画像' : '完善画像' }}</button></div>
+        <header class="inbox-hero"><div><p class="page-kicker">XGUIDE · PERSONAL ATTENTION CENTER</p><h2>先看该做什么，<br><em>再看发生什么。</em></h2><p>校园信息被整理为与你有关的事件、时机与下一步行动。</p></div><div class="inbox-hero-actions"><button class="quiet-action" @click="openProfile">{{ inboxProfileComplete ? '调整我的画像' : '完善我的画像' }}</button><button class="sync-action" @click="syncInbox" :disabled="inboxBusy">{{ inboxBusy ? '正在感知校园…' : '同步校园动态' }}</button></div></header>
+        <div class="profile-strip"><div><b>{{ inboxProfileComplete ? '个人筛选已启用' : '公开通知模式' }}</b><span>{{ inboxProfileComplete ? '排序已结合你的身份、关注方向和事务时效。' : '完成画像后，XGuide 才能判断哪些事项真正与你有关。' }} 新推送保留 {{ inboxTtlHours }} 小时。</span></div><button class="text-action" @click="openProfile">{{ inboxProfileComplete ? '编辑' : '去设置' }} →</button></div>
         <p v-if="inboxError" class="page-error">{{ inboxError }}</p>
-        <div v-if="inboxEvents.length" class="inbox-list"><article v-for="event in inboxEvents" :key="event.id" class="inbox-event"><div class="event-meta"><span>{{ event.source_name }}</span><time>{{ event.published_at || '最新采集' }}</time></div><h3>{{ event.title }}</h3><p>{{ event.summary || '查看官方原文了解详情。' }}</p><div class="event-details"><span v-if="event.deadline">截止 {{ event.deadline }}</span><span v-if="event.reason">为何推荐：{{ event.reason }}</span></div><div class="event-actions"><a :href="event.source_url" target="_blank" rel="noreferrer">查看官方原文</a><button class="text-action" @click="markInbox(event, 'ignored')">忽略</button><button class="text-action" @click="markInbox(event, 'interested')">感兴趣</button><button @click="planFromInbox(event)">加入个人计划</button></div></article></div>
-        <div v-else class="product-empty compact"><h2>{{ inboxBusy ? '正在同步通知…' : '还没有匹配到通知。' }}</h2><p>{{ inboxProfileComplete ? '稍后同步，或调整你的关注方向。' : '先完善画像，再同步公开通知。' }}</p></div>
+        <template v-if="inboxEvents.length">
+          <section class="focus-section">
+            <div class="section-head"><div><p class="section-index">01 / NOW</p><h3>今日关注</h3><p>现在最值得处理的 {{ inboxBriefing.today_focus?.length || 0 }} 件事</p></div><span class="focus-pulse">● LIVE</span></div>
+            <div v-if="inboxBriefing.today_focus?.length" class="focus-grid"><article v-for="event in inboxBriefing.today_focus" :key="event.id" class="focus-card"><div class="focus-top"><span class="category-chip">需要处理</span><strong>{{ event.attention_score }}</strong></div><h4>{{ event.title }}</h4><p class="deadline-copy" v-if="event.deadline">截止 {{ event.deadline }}</p><p class="reason-copy">{{ event.reason }}</p><ul class="reason-list"><li v-for="(score, label) in event.attention_factors" :key="label" v-if="score">{{ label }} {{ score }}</li></ul><div class="event-actions"><a :href="event.source_url" target="_blank" rel="noreferrer">官方原文 ↗</a><button @click="planFromInbox(event)">生成行动清单</button></div></article></div>
+            <div v-else class="focus-empty">今天没有迫切事项。同步校园动态或完善画像后，这里会优先呈现你的下一步。</div>
+          </section>
+
+          <section class="recommend-section"><div class="section-head"><div><p class="section-index">02 / FOR YOU</p><h3>推荐给你</h3><p>相关但不需要立刻处理的信息</p></div></div><div class="recommend-list"><article v-for="event in inboxBriefing.recommended" :key="event.id" class="recommend-card"><span :class="['category-dot', `dot-${event.category}`]"></span><div><p class="event-overline">{{ categoryLabel(event.category) }} · 关注度 {{ event.attention_score }}</p><h4>{{ event.title }}</h4><p>{{ event.summary || event.reason }}</p><div class="event-mini"><span v-if="event.deadline">截至 {{ event.deadline }}</span><span>为什么：{{ event.reason }}</span></div></div><button class="text-action" @click="planFromInbox(event)">加入计划 →</button></article></div></section>
+
+          <section class="browse-section"><div class="section-head"><div><p class="section-index">03 / EXPLORE</p><h3>分类浏览</h3><p>按你在校园里要完成的事情来组织</p></div></div><div class="category-grid"><button v-for="group in inboxBriefing.categories" :key="group.key" class="category-card" @click="selectedCategory = selectedCategory === group.key ? '' : group.key"><span>{{ categoryIcon(group.key) }}</span><b>{{ categoryLabel(group.key) }}</b><strong>{{ group.count }}</strong><small>{{ selectedCategory === group.key ? '收起事件' : '查看事件' }}</small></button></div><div v-if="selectedCategory" class="category-events"><article v-for="event in selectedCategoryEvents" :key="event.id" class="inbox-event"><div class="event-meta"><span>{{ event.source_name }}</span><time>{{ event.published_at || '最新采集' }}</time></div><h3>{{ event.title }}</h3><p>{{ event.summary || '查看官方原文了解详情。' }}</p><details v-if="event.notification_count > 1" class="event-timeline"><summary>该事件已聚合 {{ event.notification_count }} 条通知</summary><ol><li v-for="item in event.timeline" :key="item.id"><time>{{ item.date || '更新' }}</time><a :href="item.source_url" target="_blank" rel="noreferrer">{{ item.title }}</a></li></ol></details><div class="event-actions"><a :href="event.source_url" target="_blank" rel="noreferrer">官方原文 ↗</a><button class="text-action" @click="markInbox(event, 'ignored')">不再关注</button><button @click="planFromInbox(event)">加入个人计划</button></div></article></div></section>
+
+          <section class="other-section"><div><p class="section-index">04 / ARCHIVE</p><h3>其他校园动态 <span>{{ inboxBriefing.other?.length || 0 }}</span></h3></div><button class="text-action" @click="showArchive = !showArchive">{{ showArchive ? '收起' : '展开' }} →</button></section><div v-if="showArchive" class="category-events archive-list"><article v-for="event in inboxBriefing.other" :key="event.id" class="inbox-event"><h3>{{ event.title }}</h3><p>{{ event.summary || '查看官方原文了解详情。' }}</p><a :href="event.source_url" target="_blank" rel="noreferrer">官方原文 ↗</a></article></div>
+        </template>
+        <div v-else class="product-empty compact"><h2>{{ inboxBusy ? '正在同步通知…' : '暂时没有可展示的通知。' }}</h2><p>{{ inboxProfileComplete ? '稍后同步，或调整你的关注方向。' : '最近 24 小时没有同步到公开通知；稍后再试或完善画像。' }}</p></div>
       </template>
     </section>
 
@@ -227,20 +239,20 @@
 
         <section class="kb-section" v-if="scheduleCourses.length">
           <div class="panel-heading">
-            <h3>本周课程（{{ scheduleInSemester ? '第 ' + scheduleWeekNum + ' 周' : '假期（未开学）' }}）</h3>
-            <span class="pill soft">{{ scheduleCourses.length }} 门</span>
+            <div><h3>课表总览</h3><p class="schedule-caption">{{ scheduleInSemester ? '第 ' + scheduleWeekNum + ' 周进行中；完整课表按课程周次标注。' : '当前不在教学周；仍保留并展示已导入的完整课表。' }}</p></div>
+            <span class="pill soft">{{ scheduleCourses.length }} 节课</span>
           </div>
-          <div class="schedule-grid">
-            <div v-for="(courses, day) in scheduleByDay" :key="day" class="schedule-day">
-              <h4>{{ day }}</h4>
-              <template v-if="courses.length">
-                <p v-for="c in courses" :key="c.course + c.start_time" class="schedule-item">
-                  <strong>{{ c.start_time }}-{{ c.end_time }}</strong>
-                  <span>{{ c.course }}</span>
-                  <small>{{ c.location || '地点未填' }}</small>
-                </p>
-              </template>
-              <p v-else class="schedule-empty">—</p>
+          <div class="timetable-shell" aria-label="每周课表">
+            <div class="timetable">
+              <div class="timetable-head"><span>时间</span><span v-for="day in scheduleDays" :key="day">{{ day }}</span></div>
+              <div class="timetable-body">
+                <div class="timetable-times"><span v-for="time in timetableHours" :key="time">{{ time }}</span></div>
+                <div v-for="day in scheduleDays" :key="day" class="timetable-day">
+                  <article v-for="c in scheduleByDay[day]" :key="c.id || c.course + c.day_of_week + c.start_time" class="course-block" :style="courseBlockStyle(c)">
+                    <b>{{ c.course }}</b><span>{{ c.start_time }}–{{ c.end_time }}</span><small>{{ c.location || '地点未填' }}</small><em>{{ weeksLabel(c.weeks) }}</em>
+                  </article>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -442,7 +454,9 @@ import {
   completeTodo,
   createInitialSettings,
   deleteTodo,
+  deleteInbox,
   getInbox,
+  getInboxBriefing,
   getStudentProfile,
   getToday,
   getSchedule,
@@ -525,19 +539,35 @@ const todayDateLabel = ref('TODAY')
 
 // P1 Inbox 与稳定学生画像
 const inboxEvents = ref([])
+const inboxBriefing = reactive({ today_focus: [], recommended: [], categories: [], other: [] })
 const inboxBusy = ref(false)
 const inboxError = ref('')
 const inboxProfileComplete = ref(false)
+const inboxTtlHours = ref(48)
+const selectedInboxIds = ref([])
+const inboxSelectionMode = ref(false)
+const selectedCategory = ref('')
+const showArchive = ref(false)
 const showProfile = ref(false)
 const profileMsg = ref('')
 const profileInterests = ['保研', '奖学金', '竞赛', '就业', '考研', '出国']
 const studentProfile = reactive({ college: '', major: '', grade: '', education: '', interests: [] })
 const inboxNewCount = computed(() => inboxEvents.value.filter((event) => event.status === 'new').length)
+const allInboxSelected = computed(() => inboxEvents.value.length > 0 && inboxEvents.value.every((event) => selectedInboxIds.value.includes(event.id)))
+const selectedCategoryEvents = computed(() => inboxBriefing.categories.find((group) => group.key === selectedCategory.value)?.events || [])
 const todayIntro = computed(() => {
   if (!todayData.value) return '正在整理你的课表、事项和提醒。'
   const n = todayData.value.next_course
   return n ? `下一节是 ${n.start_time} 的 ${n.course}。` : '看看近期安排，把重要的事情安排好。'
 })
+
+function categoryLabel(key) {
+  return { action: '需要处理', opportunity: '机会', academic: '学业', campus_life: '校园生活', announcement: '普通通知' }[key] || '校园动态'
+}
+
+function categoryIcon(key) {
+  return { action: '✓', opportunity: '✦', academic: '⌁', campus_life: '○' }[key] || '·'
+}
 
 // 校园话题推荐（欢迎页卡片）
 const topics = [
@@ -553,16 +583,38 @@ const topics = [
 
 const currentBackend = backendMeta(settings)
 
-// 课表按星期分组（周一到周日），供周视图渲染
+// 课表按星期分组。完整数据由后端返回，即使当前并非教学周也不会显示为空。
+const scheduleDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const timetableHours = Array.from({ length: 14 }, (_, index) => `${String(index + 8).padStart(2, '0')}:00`)
+const timetablePalette = [
+  ['#e9f3ff', '#327ecb', '#1e5d9c'], ['#eef8ee', '#3f9970', '#266548'],
+  ['#fff3df', '#c58225', '#895310'], ['#f3edff', '#845fc4', '#54368d'],
+  ['#fff0f3', '#c95f79', '#8c3450'], ['#eaf8f7', '#218f8d', '#16615f'],
+]
+
 const scheduleByDay = computed(() => {
-  const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-  const groups = Object.fromEntries(days.map((d) => [d, []]))
+  const groups = Object.fromEntries(scheduleDays.map((d) => [d, []]))
   for (const c of scheduleCourses.value) {
-    const name = days[c.day_of_week] || '周一'
+    const name = scheduleDays[c.day_of_week] || '周一'
     if (groups[name]) groups[name].push(c)
   }
   return groups
 })
+
+function courseBlockStyle(course) {
+  const toMinutes = (value) => { const [hour, minute] = String(value || '08:00').split(':').map(Number); return hour * 60 + minute }
+  const start = toMinutes(course.start_time)
+  const end = toMinutes(course.end_time)
+  const top = Math.max(0, (start - 8 * 60) / 60 * 58)
+  const height = Math.max(42, (end - start) / 60 * 58 - 5)
+  const hash = [...String(course.course || '')].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
+  const [background, accent, ink] = timetablePalette[hash % timetablePalette.length]
+  return { top: `${top}px`, height: `${height}px`, '--course-bg': background, '--course-accent': accent, '--course-ink': ink }
+}
+
+function weeksLabel(weeks) {
+  return weeks ? `第 ${weeks} 周` : '全周'
+}
 
 watch(
   () => settings.conversationId,
@@ -695,9 +747,12 @@ async function loadInbox() {
   inboxBusy.value = true
   inboxError.value = ''
   try {
-    const data = await getInbox(settings)
+    const data = await getInboxBriefing(settings)
     inboxEvents.value = data.events || []
+    Object.assign(inboxBriefing, { today_focus: [], recommended: [], categories: [], other: [], ...data })
     inboxProfileComplete.value = Boolean(data.profile_complete)
+    inboxTtlHours.value = data.ttl_hours || 48
+    selectedInboxIds.value = selectedInboxIds.value.filter((id) => inboxEvents.value.some((event) => event.id === id))
   } catch (error) {
     inboxError.value = readableError(error)
   } finally {
@@ -735,6 +790,55 @@ async function planFromInbox(event) {
     await loadToday()
   } catch (error) {
     inboxError.value = readableError(error)
+  }
+}
+
+function toggleInboxSelection(id, checked) {
+  selectedInboxIds.value = checked
+    ? [...new Set([...selectedInboxIds.value, id])]
+    : selectedInboxIds.value.filter((value) => value !== id)
+}
+
+function startInboxSelection() {
+  inboxSelectionMode.value = true
+}
+
+function cancelInboxSelection() {
+  inboxSelectionMode.value = false
+  selectedInboxIds.value = []
+}
+
+function toggleAllInbox(checked) {
+  selectedInboxIds.value = checked ? inboxEvents.value.map((event) => event.id) : []
+}
+
+async function deleteSelectedInbox() {
+  if (!selectedInboxIds.value.length) return
+  inboxBusy.value = true
+  inboxError.value = ''
+  try {
+    await deleteInbox(settings, selectedInboxIds.value)
+    cancelInboxSelection()
+    await loadInbox()
+  } catch (error) {
+    inboxError.value = readableError(error)
+  } finally {
+    inboxBusy.value = false
+  }
+}
+
+async function clearInbox() {
+  if (!window.confirm('确定清空当前 Inbox 中的全部通知吗？公共赛事与通知源不会被删除。')) return
+  inboxBusy.value = true
+  inboxError.value = ''
+  try {
+    await deleteInbox(settings)
+    cancelInboxSelection()
+    await loadInbox()
+  } catch (error) {
+    inboxError.value = readableError(error)
+  } finally {
+    inboxBusy.value = false
   }
 }
 

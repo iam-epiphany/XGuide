@@ -14,6 +14,7 @@ mcp（MCP 协议）、system（健康/Skills/校园公开信息）。
 """
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import logging
 import os
 import pathlib
@@ -74,6 +75,16 @@ BANNER = r"""
     ʕ•ᴥ•ʔ  ʕ•ᴥ•ʔ  ʕ•ᴥ•ʔ
 """
 
+# 中国标准时间固定为 UTC+8，避免 Windows Python 未安装 tzdata 时 ZoneInfo 导入失败。
+_RADAR_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
+
+
+def next_radar_sync_at(now: datetime | None = None) -> datetime:
+    """返回下一个北京时间 08:00 的 Campus Radar 同步时刻。"""
+    current = (now.astimezone(_RADAR_TIMEZONE) if now else datetime.now(_RADAR_TIMEZONE))
+    scheduled = current.replace(hour=8, minute=0, second=0, microsecond=0)
+    return scheduled if current < scheduled else scheduled + timedelta(days=1)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -89,15 +100,18 @@ async def lifespan(app: FastAPI):
     await state._monitor.start()
 
     async def refresh_public_notices() -> None:
-        """启动时及其后定期同步公开通知；失败只记日志，不阻塞主服务。"""
-        interval = max(300, int(os.getenv("ECHOGUIDE_RADAR_INTERVAL_SECONDS", "1800")))
+        """启动即同步一次，之后在每天北京时间 08:00 同步公开通知。"""
+        next_run = next_radar_sync_at()
         while True:
             try:
                 result = await state._campus_radar.refresh()
                 logger.info("校园通知雷达同步：检查 %s 条，新增 %s 条", result["checked"], result["new_events"])
             except Exception as ex:
-                logger.warning("校园通知雷达同步失败（将在下个周期重试）: %s", ex)
-            await asyncio.sleep(interval)
+                logger.warning("校园通知雷达同步失败（将在下一次定时任务重试）: %s", ex)
+            delay_seconds = max(0.0, (next_run - datetime.now(_RADAR_TIMEZONE)).total_seconds())
+            logger.info("校园通知雷达下次定时同步：%s", next_run.isoformat())
+            await asyncio.sleep(delay_seconds)
+            next_run = next_radar_sync_at()
 
     state._spawn_background(refresh_public_notices())
 

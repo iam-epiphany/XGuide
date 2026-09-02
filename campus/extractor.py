@@ -16,7 +16,8 @@ def rule_extract(title: str, body: str) -> Dict[str, Any]:
     deadline_match = re.search(r"(?:截止(?:时间)?|报名(?:截止)?|请于)\s*[:：]?\s*(20\d{2}[年./-]\s*\d{1,2}[月./-]\s*\d{1,2}日?)", text)
     targets = [label for label, words in {"本科生": ("本科生", "本科"), "研究生": ("研究生", "硕士", "博士"), "毕业生": ("毕业生", "应届", "届毕业")}.items() if any(word in text for word in words)]
     actions = [word for word in ("报名", "申请", "提交", "填报", "参赛", "领取") if word in text]
-    return {"event_type": "通知", "summary": body[:280], "deadline": _date(deadline_match.group(1)) if deadline_match else None, "targets": targets, "requirements": [], "materials": [], "actions": actions, "location": "", "extraction": "rule"}
+    event_type = "竞赛" if any(word in text for word in ("竞赛", "大赛")) else "通知"
+    return {"event_type": event_type, "summary": body[:280], "deadline": _date(deadline_match.group(1)) if deadline_match else None, "targets": targets, "requirements": [], "materials": [], "actions": actions, "location": "", "extraction": "rule"}
 
 
 class CampusEventExtractor:

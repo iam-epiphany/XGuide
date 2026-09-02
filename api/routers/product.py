@@ -42,6 +42,11 @@ class InboxStatusBody(BaseModel):
     status: Literal["seen", "ignored", "interested"]
 
 
+class InboxDeleteBody(BaseModel):
+    # 空数组（或省略请求体）表示清空当前用户的 Inbox。
+    event_ids: List[int] = Field(default_factory=list, max_length=100)
+
+
 @router.get("/personal/today")
 async def today(user=Depends(require_user)):
     return await _personal().overview(user.id)
@@ -89,7 +94,28 @@ async def refresh_inbox(user=Depends(require_user)):
 async def inbox(status: Literal["active", "all", "new", "seen", "interested", "ignored"] = "active", user=Depends(require_user)):
     profile = await _personal().store.get_profile(user.id)
     events = await _radar().inbox(user.id, profile, status)
-    return {"events": events, "profile_complete": bool(profile.get("education") or profile.get("interests")), "total": len(events)}
+    profile_complete = bool(profile.get("education") or profile.get("interests"))
+    return {
+        "events": events,
+        "profile_complete": profile_complete,
+        "delivery_mode": "personalized" if profile_complete else "recent_public",
+        "ttl_hours": _radar().inbox_ttl_hours,
+        "total": len(events),
+    }
+
+
+@router.get("/inbox/briefing")
+async def inbox_briefing(user=Depends(require_user)):
+    """Personal attention center: scored CampusEvents, grouped from source notices."""
+    profile = await _personal().store.get_profile(user.id)
+    briefing = await _radar().inbox_briefing(user.id, profile)
+    profile_complete = bool(profile.get("education") or profile.get("interests"))
+    return {
+        **briefing,
+        "profile_complete": profile_complete,
+        "delivery_mode": "personalized" if profile_complete else "recent_public",
+        "ttl_hours": _radar().inbox_ttl_hours,
+    }
 
 
 @router.post("/inbox/{event_id}/status")
@@ -97,6 +123,12 @@ async def set_inbox_status(event_id: int, body: InboxStatusBody, user=Depends(re
     if not await _radar().set_status(user.id, event_id, body.status):
         raise HTTPException(404, "通知不在当前用户的收件箱中")
     return {"message": "已更新"}
+
+
+@router.delete("/inbox")
+async def delete_inbox(body: InboxDeleteBody | None = None, user=Depends(require_user)):
+    deleted = await _radar().delete_inbox(user.id, body.event_ids if body else None)
+    return {"message": "已删除", "deleted": deleted}
 
 
 @router.post("/inbox/{event_id}/add-to-plan")

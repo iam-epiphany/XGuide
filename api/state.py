@@ -323,7 +323,7 @@ def _build_runtime() -> None:
     _personal_service = PersonalService(PersonalStore())
     logger.info("个人数据中心已就绪: %s", _personal_service.store.db_path)
     _campus_radar = CampusRadar(_personal_service.store, extractor=CampusEventExtractor(client=_tool_manager._client, model=_tool_manager._model, gateway=_gateway))
-    logger.info("校园通知雷达已就绪（公开源 %s 个）", 3)
+    logger.info("校园通知雷达已就绪（公开源 %s 个）", len(_campus_radar.adapters))
 
     _tool_manager.register(Tool(
         name="query_schedule",

@@ -90,15 +90,20 @@ async def import_schedule_file(
 
 @router.get("/schedule")
 async def get_schedule(user=Depends(require_user)):
-    """查看用户课表（本周周视图 + 全部课程）。"""
+    """查看用户完整课表，并附带当前教学周的课程子集。"""
     personal = _require_personal_service()
     weekly = await personal.weekly_overview(user.id)
+    # 不能只返回当前教学周：开学前、假期或仅导入后续周课程时，空周视图会让前端
+    # 误以为上传的数据丢失。完整课表始终由 SQLite 返回，周视图作为附加信息。
+    courses = await personal.store.get_schedule(user.id)
     return {
         "user_id": user.id,
         "week_num": weekly["week_num"],
         "monday": weekly["monday"],
-        "courses": weekly["courses"],
-        "total": len(weekly["courses"]),
+        "in_semester": weekly["in_semester"],
+        "courses": courses,
+        "weekly_courses": weekly["courses"],
+        "total": len(courses),
     }
 
 

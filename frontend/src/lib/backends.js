@@ -219,6 +219,10 @@ export async function getInbox(settings, status = 'active') {
   return requestJson(backendMeta(settings).baseUrl, `/inbox?status=${encodeURIComponent(status)}`)
 }
 
+export async function getInboxBriefing(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/inbox/briefing')
+}
+
 export async function refreshInbox(settings) {
   return requestJson(backendMeta(settings).baseUrl, '/inbox/refresh', { method: 'POST' })
 }
@@ -226,6 +230,12 @@ export async function refreshInbox(settings) {
 export async function setInboxStatus(settings, id, status) {
   return requestJson(backendMeta(settings).baseUrl, `/inbox/${id}/status`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+  })
+}
+
+export async function deleteInbox(settings, eventIds = []) {
+  return requestJson(backendMeta(settings).baseUrl, '/inbox', {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_ids: eventIds })
   })
 }
 

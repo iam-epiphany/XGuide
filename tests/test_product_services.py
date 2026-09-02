@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 import hashlib
+from types import SimpleNamespace
 
 import httpx
 
-from campus.adapters import HtmlNoticeAdapter, NoticeLink, NoticePage, PublicSourceAdapter
+from api import state
+from api.routers.memory import get_schedule
+from campus.adapters import CPIPCCompetitionAdapter, HtmlNoticeAdapter, NoticeLink, NoticePage, PublicSourceAdapter
 from campus.radar import CampusRadar
 from mcp.tool_manager import MCPToolManager, Tool, ToolEffect
 from personal.service import PersonalService
@@ -77,6 +81,114 @@ def test_html_adapter_filters_notice_links_and_preserves_listing_date():
         ("关于第一学期选课的通知", "2026-09-01"),
         ("关于开展实验班选拔的通知", "2026-09-02"),
     ]
+
+
+def test_cpipc_adapter_splits_public_schedule_into_competitions_with_deadlines():
+    listing = '<a href="/pw/notice/detail/schedule">2026年度各主题赛事赛程一览</a>'
+    schedule = """
+    <h1>2026年度中国研究生创新实践系列大赛各主题赛事赛程一览</h1>
+    <span>发布时间：2026-05-21</span>
+    <table><tr><th>序号</th><th>主题赛事</th><th>报名时间</th><th>提交作品时间</th><th>决赛时间</th></tr>
+    <tr><td>1</td><td>人工智能创新大赛</td><td>5月22日-8月25日</td><td>5月22日-9月1日</td><td>待定</td></tr>
+    <tr><td>2</td><td>网络安全创新大赛</td><td>6月18日-10月18日</td><td>6月18日-10月22日</td><td>待定</td></tr></table>
+    """
+
+    async def run():
+        def handler(request):
+            return httpx.Response(200, text=listing if request.url.path.endswith("/list/1") else schedule)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            adapter = CPIPCCompetitionAdapter(
+                listing_url="https://cpipc.example/pw/notice/list/1",
+                fallback_schedule_url="https://cpipc.example/pw/notice/detail/fallback",
+            )
+            links = await adapter.discover(client)
+            pages = [await adapter.fetch(client, link) for link in links]
+            return links, pages
+
+    links, pages = asyncio.run(run())
+    assert [link.title for link in links] == ["中国研究生人工智能创新大赛", "中国研究生网络安全创新大赛"]
+    assert [link.published_at for link in links] == ["2026-05-21", "2026-05-21"]
+    assert "报名截止：2026年8月25日" in pages[0].body
+    assert "报名截止：2026年10月18日" in pages[1].body
+    assert all("#competition-" in link.url for link in links)
+
+
+def test_inbox_does_not_deliver_events_after_their_deadline(tmp_path):
+    store = PersonalStore(str(tmp_path / "expired-competition.db"))
+    radar = CampusRadar(store)
+    today = datetime.now().date()
+    expired, active = (today - timedelta(days=1)).isoformat(), (today + timedelta(days=1)).isoformat()
+    events = []
+    for suffix, deadline in (("expired", expired), ("active", active)):
+        url = f"https://cpipc.example/competition/{suffix}"
+        events.append({
+            "fingerprint": hashlib.sha256(url.encode()).hexdigest(),
+            "title": f"中国研究生人工智能创新大赛-{suffix}",
+            "summary": f"研究生报名截止：{deadline.replace('-', '年', 1).replace('-', '月', 1)}日",
+            "body": "研究生竞赛报名", "source_name": "中国研究生创新实践系列大赛",
+            "source_category": "competition", "source_url": url, "published_at": today.isoformat(),
+            "deadline": deadline, "targets": ["研究生"], "actions": ["报名"],
+        })
+    assert radar._save_events_sync(events) == 2
+
+    inbox = asyncio.run(radar.inbox("u", {"education": "研究生", "interests": ["竞赛"]}))
+
+    assert [event["deadline"] for event in inbox] == [active]
+
+
+def test_inbox_ttl_and_personal_deletion_do_not_recreate_notifications(tmp_path):
+    store = PersonalStore(str(tmp_path / "inbox-ttl.db"))
+    radar = CampusRadar(store, inbox_ttl_hours=48)
+    today = datetime.now().date()
+    url = "https://notice.example/ttl"
+    radar._save_events_sync([{
+        "fingerprint": hashlib.sha256(url.encode()).hexdigest(), "title": "本科生奖学金申请",
+        "summary": "本科生奖学金申请", "body": "本科生奖学金申请", "source_name": "本科生院",
+        "source_category": "academic", "source_url": url, "published_at": today.isoformat(),
+        "deadline": (today + timedelta(days=7)).isoformat(), "targets": ["本科生"], "actions": ["申请"],
+    }])
+    profile = {"education": "本科生", "interests": ["奖学金"]}
+    event = asyncio.run(radar.inbox("u", profile))[0]
+    assert event["expires_at"] > event["updated_at"]
+
+    assert asyncio.run(radar.delete_inbox("u", [event["id"]])) == 1
+    assert asyncio.run(radar.inbox("u", profile)) == []
+
+    # TTL 已到期的记录即使仍可从公共源计算出相关性，也不能再次显示。
+    with store._connect() as conn:
+        conn.execute("UPDATE campus_inbox SET status='new', expires_at='2000-01-01 00:00:00' WHERE user_id='u'")
+    assert asyncio.run(radar.inbox("u", profile)) == []
+
+
+def test_empty_profile_receives_recent_public_notices(tmp_path):
+    radar = CampusRadar(PersonalStore(str(tmp_path / "recent-notices.db")), adapters=[_FakeAdapter()])
+    asyncio.run(radar.refresh())
+
+    events = asyncio.run(radar.inbox("u", {}))
+
+    assert len(events) == 1
+    assert events[0]["relevance"] == 1
+    assert "最近 24 小时" in events[0]["reason"]
+
+    # 保存画像后，恢复既有的相关性阈值；不相关画像不接收该奖学金通知。
+    filtered = asyncio.run(radar.inbox("u2", {"education": "研究生", "interests": ["出国"]}))
+    assert filtered == []
+
+
+def test_schedule_endpoint_keeps_full_schedule_outside_current_week(tmp_path, monkeypatch):
+    service = PersonalService(PersonalStore(str(tmp_path / "schedule.db")))
+    asyncio.run(service.import_courses("u", [{
+        "course": "高等数学", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05",
+        "location": "B-101", "weeks": "1-16",
+    }]))
+    monkeypatch.setattr(state, "_personal_service", service)
+
+    response = asyncio.run(get_schedule(user=SimpleNamespace(id="u")))
+
+    assert [course["course"] for course in response["courses"]] == ["高等数学"]
+    assert response["total"] == 1
+    assert "weekly_courses" in response
 
 
 class _FakeAdapter(PublicSourceAdapter):

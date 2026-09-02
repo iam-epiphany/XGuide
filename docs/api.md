@@ -57,7 +57,7 @@
 
 ## Campus Radar、Inbox 与行动计划
 
-Campus Radar 仅访问无需登录的官方公开页面。同步请求不会携带学生画像或登录 Cookie 给外部网站；每个事件保留 `source_url`，页面应让用户回到官方原文核验。
+Campus Radar 仅访问无需登录的官方公开页面。同步请求不会携带学生画像或登录 Cookie 给外部网站；每个事件保留 `source_url`，页面应让用户回到官方原文核验。除校内公开源外，已接入研创网（中国研究生创新实践系列大赛）的年度公开赛程：每项主题赛事（含赛程表中单列的子赛道）会被拆为独立事件，报名截止日未过时才会依据用户画像进入 Inbox。新投递的 Inbox 通知默认保留 48 小时；删除仅清除当前用户的收件箱记录，不会删除公共来源事件。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -66,6 +66,7 @@ Campus Radar 仅访问无需登录的官方公开页面。同步请求不会携�
 | POST | `/inbox/refresh` | 同步公开通知源，返回已检查/新增/更新/未变更数量及来源错误 |
 | GET | `/inbox?status=active` | 读取个性化 Inbox；状态可为 `active`、`all`、`new`、`seen`、`interested`、`ignored` |
 | POST | `/inbox/{event_id}/status` | 设置为 `seen`、`interested` 或 `ignored` |
+| DELETE | `/inbox` | 传入 `event_ids` 批量删除；传空数组或空请求体一键清空当前用户 Inbox |
 | POST | `/inbox/{event_id}/add-to-plan` | 依据通知原文中已提取的材料/动作创建个人待办 |
 
 学生画像请求体示例：
