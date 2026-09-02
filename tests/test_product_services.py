@@ -117,7 +117,7 @@ def test_cpipc_adapter_splits_public_schedule_into_competitions_with_deadlines()
 def test_inbox_does_not_deliver_events_after_their_deadline(tmp_path):
     store = PersonalStore(str(tmp_path / "expired-competition.db"))
     radar = CampusRadar(store)
-    today = datetime.now().date()
+    today = datetime.now().astimezone().date()
     expired, active = (today - timedelta(days=1)).isoformat(), (today + timedelta(days=1)).isoformat()
     events = []
     for suffix, deadline in (("expired", expired), ("active", active)):
@@ -140,7 +140,7 @@ def test_inbox_does_not_deliver_events_after_their_deadline(tmp_path):
 def test_inbox_ttl_and_personal_deletion_do_not_recreate_notifications(tmp_path):
     store = PersonalStore(str(tmp_path / "inbox-ttl.db"))
     radar = CampusRadar(store, inbox_ttl_hours=48)
-    today = datetime.now().date()
+    today = datetime.now().astimezone().date()
     url = "https://notice.example/ttl"
     radar._save_events_sync([{
         "fingerprint": hashlib.sha256(url.encode()).hexdigest(), "title": "本科生奖学金申请",

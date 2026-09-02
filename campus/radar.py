@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -359,7 +359,7 @@ class CampusRadar:
         deadline = event.get("deadline")
         if deadline:
             try:
-                days = (datetime.strptime(deadline, "%Y-%m-%d").date() - datetime.now().date()).days
+                days = (date.fromisoformat(deadline) - datetime.now().astimezone().date()).days
                 urgency = 40 if days <= 0 else 35 if days <= 1 else 28 if days <= 3 else 18 if days <= 7 else 8
             except ValueError:
                 urgency = 0

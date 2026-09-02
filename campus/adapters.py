@@ -6,7 +6,7 @@ Adapter 只负责“从哪里发现通知、怎样取得正文”；Radar 不再
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from html.parser import HTMLParser
 import re
 from typing import Dict, List, Optional, Sequence
@@ -263,7 +263,7 @@ class CPIPCCompetitionAdapter(PublicSourceAdapter):
     @staticmethod
     def _schedule_year(html: str) -> int:
         match = re.search(r"(20\d{2})年度[^<]{0,50}赛程", html)
-        return int(match.group(1)) if match else datetime.now().year
+        return int(match.group(1)) if match else datetime.now().astimezone().year
 
     @staticmethod
     def _published_at(html: str) -> Optional[str]:
@@ -308,7 +308,7 @@ class CPIPCCompetitionAdapter(PublicSourceAdapter):
         # 多赛道说明会并列多个截止日；取报名文本中最晚日期，避免主赛道仍开放时过早停止推送。
         month, day = max((int(month), int(day)) for month, day in dates)
         try:
-            return datetime(year, month, day).strftime("%Y-%m-%d")
+            return date(year, month, day).isoformat()
         except ValueError:
             return None
 
