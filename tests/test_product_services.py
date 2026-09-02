@@ -4,7 +4,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 
-from campus.adapters import NoticeLink, NoticePage, PublicSourceAdapter
+import httpx
+
+from campus.adapters import HtmlNoticeAdapter, NoticeLink, NoticePage, PublicSourceAdapter
 from campus.radar import CampusRadar
 from mcp.tool_manager import MCPToolManager, Tool, ToolEffect
 from personal.service import PersonalService
@@ -53,6 +55,30 @@ def test_profile_filters_public_event_and_keeps_source(tmp_path):
     assert asyncio.run(radar.set_status("u", inbox[0]["id"], "interested")) is True
 
 
+def test_html_adapter_filters_notice_links_and_preserves_listing_date():
+    html = """
+    <a href="/tzgg.htm" title="通知公告">通知公告</a>
+    <a href="/info/1012/23223.htm" title="关于第一学期选课的通知">关于第一学期选课的通知 <span>2026-09-01</span></a>
+    <a href="/info/1012/23224.htm">2026-09-02 关于开展实验班选拔的通知</a>
+    <a href="/info/1023/21373.htm" title="教改新闻">教改新闻 <span>2026-09-02</span></a>
+    """
+
+    async def run():
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, text=html))
+        async with httpx.AsyncClient(transport=transport) as client:
+            adapter = HtmlNoticeAdapter(
+                name="本科生院", category="academic", listing_url="https://jwc.example/tzgg.htm",
+                include_url_patterns=(r"/info/1012/\d+\.htm$",),
+            )
+            return await adapter.discover(client)
+
+    links = asyncio.run(run())
+    assert [(link.title, link.published_at) for link in links] == [
+        ("关于第一学期选课的通知", "2026-09-01"),
+        ("关于开展实验班选拔的通知", "2026-09-02"),
+    ]
+
+
 class _FakeAdapter(PublicSourceAdapter):
     name, category = "测试本科生院", "academic"
 
@@ -63,6 +89,19 @@ class _FakeAdapter(PublicSourceAdapter):
         return [NoticeLink("https://notice.example/1", "国家奖学金申请", self.name, self.category)]
 
     async def fetch(self, client, link, *, etag=None, last_modified=None):
+        return NoticePage(link, self.body, "v1", None)
+
+
+class _PartiallyFailingAdapter(_FakeAdapter):
+    async def discover(self, client):
+        return [
+            NoticeLink("https://notice.example/fail", "读取失败的通知", self.name, self.category),
+            NoticeLink("https://notice.example/ok", "国家奖学金申请", self.name, self.category, "2026-09-01"),
+        ]
+
+    async def fetch(self, client, link, *, etag=None, last_modified=None):
+        if link.url.endswith("/fail"):
+            raise httpx.ReadTimeout("temporary")
         return NoticePage(link, self.body, "v1", None)
 
 
@@ -95,6 +134,15 @@ def test_incremental_event_sync_and_action_plan_provenance(tmp_path):
     assert plan["items"][-1]["due_at"] == "2026-09-15"
     assert all(item["source_event_id"] == event["id"] for item in plan["items"])
     assert all(item["source_url"] == "https://notice.example/1" for item in plan["items"])
+
+
+def test_refresh_keeps_syncing_when_one_notice_page_fails(tmp_path):
+    radar = CampusRadar(PersonalStore(str(tmp_path / "partial.db")), adapters=[_PartiallyFailingAdapter()])
+    result = asyncio.run(radar.refresh())
+    assert result["checked"] == 2
+    assert result["new_events"] == 1
+    assert result["failed"] == 1
+    assert result["errors"] == [{"source": "测试本科生院", "message": "1 条通知读取失败"}]
 
 
 def test_agent_tool_reads_same_event_store_as_inbox(tmp_path):

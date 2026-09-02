@@ -129,7 +129,7 @@ class CampusRadar:
 
     async def refresh(self) -> Dict[str, Any]:
         results = await asyncio.gather(*(self._refresh_adapter(adapter) for adapter in self.adapters), return_exceptions=True)
-        inserted, updated, unchanged, checked, errors = 0, 0, 0, 0, []
+        inserted, updated, unchanged, checked, failed, errors = 0, 0, 0, 0, 0, []
         for adapter, result in zip(self.adapters, results, strict=False):
             if isinstance(result, Exception):
                 errors.append({"source": adapter.name, "message": str(result)[:180]})
@@ -138,16 +138,24 @@ class CampusRadar:
             inserted += result["new"]
             updated += result["updated"]
             unchanged += result["unchanged"]
-        return {"sources": len(self.adapters), "checked": checked, "new_events": inserted, "updated_events": updated, "unchanged": unchanged, "errors": errors}
+            failed += result.get("failed", 0)
+            if result.get("failed"):
+                errors.append({"source": adapter.name, "message": f"{result['failed']} 条通知读取失败"})
+        return {"sources": len(self.adapters), "checked": checked, "new_events": inserted, "updated_events": updated, "unchanged": unchanged, "failed": failed, "errors": errors}
 
     async def _refresh_adapter(self, adapter: PublicSourceAdapter) -> Dict[str, int]:
-        counts = {"checked": 0, "new": 0, "updated": 0, "unchanged": 0}
+        counts = {"checked": 0, "new": 0, "updated": 0, "unchanged": 0, "failed": 0}
         async with httpx.AsyncClient(timeout=12, follow_redirects=True, headers={"User-Agent": "XGuide Campus Radar/1.0 (+public information only)"}) as client:
             links = await adapter.discover(client)
             for link in links:
                 counts["checked"] += 1
                 prior = await self.store._run(self._event_sync, link.url)
-                page = await adapter.fetch(client, link, etag=prior.get("etag") if prior else None, last_modified=prior.get("last_modified") if prior else None)
+                try:
+                    page = await adapter.fetch(client, link, etag=prior.get("etag") if prior else None, last_modified=prior.get("last_modified") if prior else None)
+                except (httpx.HTTPError, ValueError):
+                    # 单页临时异常不应中止同一来源的其余通知同步。
+                    counts["failed"] += 1
+                    continue
                 if page.not_modified:
                     await self.store._run(self._touch_checked_sync, link.url)
                     counts["unchanged"] += 1
@@ -158,7 +166,7 @@ class CampusRadar:
                     counts["unchanged"] += 1
                     continue
                 fields = await self.extractor.extract(link.title, page.body)
-                state = await self.store._run(self._upsert_event_sync, {"url": link.url, "title": link.title, "body": page.body, "source_name": link.source_name, "source_category": link.source_category, "etag": page.etag, "last_modified": page.last_modified, "content_hash": content_hash, **fields})
+                state = await self.store._run(self._upsert_event_sync, {"url": link.url, "title": link.title, "body": page.body, "source_name": link.source_name, "source_category": link.source_category, "published_at": link.published_at, "etag": page.etag, "last_modified": page.last_modified, "content_hash": content_hash, **fields})
                 counts[state] += 1
         return counts
 
@@ -176,7 +184,7 @@ class CampusRadar:
         now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         existing = self._event_sync(event["url"])
         with self.store._connect() as conn:
-            values = (hashlib.sha256(event["url"].encode()).hexdigest(), event["title"], event["summary"], event["body"], event["source_name"], event["source_category"], event["url"], _date_in(event["body"]) or _date_in(event["title"]), event.get("deadline"), json.dumps(event.get("targets", []), ensure_ascii=False), json.dumps(event.get("actions", []), ensure_ascii=False), json.dumps(event.get("requirements", []), ensure_ascii=False), json.dumps(event.get("materials", []), ensure_ascii=False), event.get("location", ""), event.get("event_type", "通知"), event["content_hash"], event.get("etag"), event.get("last_modified"), now, now, now)
+            values = (hashlib.sha256(event["url"].encode()).hexdigest(), event["title"], event["summary"], event["body"], event["source_name"], event["source_category"], event["url"], event.get("published_at") or _date_in(event["body"]) or _date_in(event["title"]), event.get("deadline"), json.dumps(event.get("targets", []), ensure_ascii=False), json.dumps(event.get("actions", []), ensure_ascii=False), json.dumps(event.get("requirements", []), ensure_ascii=False), json.dumps(event.get("materials", []), ensure_ascii=False), event.get("location", ""), event.get("event_type", "通知"), event["content_hash"], event.get("etag"), event.get("last_modified"), now, now, now)
             conn.execute("""INSERT INTO campus_events (fingerprint,title,summary,body,source_name,source_category,source_url,published_at,deadline,targets_json,actions_json,requirements_json,materials_json,location,event_type,content_hash,etag,last_modified,fetched_at,last_checked_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET title=excluded.title,summary=excluded.summary,body=excluded.body,published_at=excluded.published_at,deadline=excluded.deadline,targets_json=excluded.targets_json,actions_json=excluded.actions_json,requirements_json=excluded.requirements_json,materials_json=excluded.materials_json,location=excluded.location,event_type=excluded.event_type,content_hash=excluded.content_hash,etag=excluded.etag,last_modified=excluded.last_modified,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at""", values)
         return "updated" if existing else "new"
 
@@ -188,7 +196,7 @@ class CampusRadar:
             for link in await adapter.discover(client):
                 page = await adapter.fetch(client, link)
                 fields = await self.extractor.extract(link.title, page.body)
-                events.append({"fingerprint": hashlib.sha256(link.url.encode("utf-8")).hexdigest(), "title": link.title, "body": page.body, "source_name": link.source_name, "source_category": link.source_category, "source_url": link.url, "published_at": _date_in(page.body) or _date_in(link.title), **fields})
+                events.append({"fingerprint": hashlib.sha256(link.url.encode("utf-8")).hexdigest(), "title": link.title, "body": page.body, "source_name": link.source_name, "source_category": link.source_category, "source_url": link.url, "published_at": link.published_at or _date_in(page.body) or _date_in(link.title), **fields})
         return {"checked": len(events), "events": events}
 
     def _save_events_sync(self, events: List[Dict[str, Any]]) -> int:
