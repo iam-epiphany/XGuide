@@ -20,32 +20,54 @@ async function api(pathname, options = {}) {
   return context.request.fetch(`${apiUrl}${pathname}`, options)
 }
 
-async function prepare() {
-  await api('/auth/register', { method: 'POST', data: { username, password } })
-  const login = await api('/auth/login', { method: 'POST', data: { username, password } })
-  if (!login.ok()) throw new Error(`Demo 登录失败: ${login.status()} ${await login.text()}`)
+async function clearDemoPersonalData() {
   await api('/personal/schedule', { method: 'DELETE' })
   const todoResponse = await api('/personal/todo?status=all')
   if (!todoResponse.ok()) throw new Error(`Demo 待办读取失败: ${await todoResponse.text()}`)
   const todoPayload = await todoResponse.json()
   for (const todo of todoPayload.todos || []) {
     const removed = await api(`/personal/todo/${todo.id}`, { method: 'DELETE' })
-    if (!removed.ok()) throw new Error(`Demo 待办清理失败: ${await removed.text()}`)
+      if (!removed.ok()) throw new Error(`Demo 待办清理失败: ${await removed.text()}`)
   }
+}
+
+async function addDemoTodo(content, kind, dueAt = null) {
+  const response = await api('/personal/todo', { method: 'POST', data: { content, kind, due_at: dueAt } })
+  if (!response.ok()) throw new Error(`Demo 待办写入失败: ${await response.text()}`)
+}
+
+async function prepare() {
+  await api('/auth/register', { method: 'POST', data: { username, password } })
+  const login = await api('/auth/login', { method: 'POST', data: { username, password } })
+  if (!login.ok()) throw new Error(`Demo 登录失败: ${login.status()} ${await login.text()}`)
+  await clearDemoPersonalData()
+
   const now = new Date()
   const day = (now.getDay() + 6) % 7
+  const date = (offset) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset).toISOString().slice(0, 10)
   const courses = [
-    { course: '智能系统导论', day_of_week: day, start_time: '10:10', end_time: '11:55', location: '南校区B楼-203', weeks: [] },
+    { course: '机器学习导论', day_of_week: day, start_time: '09:50', end_time: '11:35', location: '南校区B楼-203', weeks: [] },
+    { course: '分布式系统', day_of_week: day, start_time: '13:50', end_time: '15:35', location: '南校区A楼-416', weeks: [] },
+    { course: '自然语言处理', day_of_week: day, start_time: '18:30', end_time: '20:05', location: '南校区F楼-205', weeks: [] },
     { course: '计算机网络', day_of_week: (day + 1) % 7, start_time: '08:30', end_time: '10:05', location: '南校区A楼-101', weeks: [] }
   ]
   const imported = await api('/personal/schedule/import', { method: 'POST', data: { courses } })
   if (!imported.ok()) throw new Error(`Demo 课表导入失败: ${await imported.text()}`)
+  await addDemoTodo('整理实验报告提纲', 'todo')
+  await addDemoTodo('提交机器学习作业', 'ddl', date(2))
+  await addDemoTodo('软件工程课程考试', 'exam', date(5))
+}
+
+async function captureToday() {
+  const page = await openPage()
+  await page.locator('.today-grid').waitFor({ state: 'visible' })
+  await page.screenshot({ path: path.join(outputDir, '00-today.png'), fullPage: true })
+  await page.close()
 }
 
 async function openPage() {
   const page = await context.newPage()
   await page.goto(`${baseUrl}/?debug=1`, { waitUntil: 'networkidle' })
-  await page.locator('textarea').waitFor({ state: 'visible' })
   return page
 }
 
@@ -68,6 +90,7 @@ async function ask(page, question, expected = {}) {
 
 async function capture(filename, prompts, expected) {
   const page = await openPage()
+  await page.locator('textarea').waitFor({ state: 'visible' })
   for (let i = 0; i < prompts.length; i += 1) {
     await ask(page, prompts[i], i === prompts.length - 1 ? expected : {})
   }
@@ -83,6 +106,7 @@ async function capture(filename, prompts, expected) {
 
 async function captureMemoryAndGuard() {
   const page = await openPage()
+  await page.locator('textarea').waitFor({ state: 'visible' })
   await ask(page, '南校区图书馆在哪里？')
   await ask(page, '那几点关门呢？', { contains: ['history'] })
   const before = await page.locator('article.message.assistant').count()
@@ -106,12 +130,16 @@ async function captureMemoryAndGuard() {
 
 try {
   await prepare()
-  await capture('01-fast-personal.png', ['我今天有什么课？'], { contains: ['fast', 'query_schedule'] })
-  await capture('02-specialized-tools.png', ['校园卡丢了，补办需要什么材料？'], { contains: ['fast', 'query_affairs_process'] })
-  await capture('03-deep-rag.png', ['西电转专业通常需要满足哪些条件？请检索资料并给出来源。'], { contains: ['deep', 'knowledge_search'] })
-  await capture('04-multi-agent-dag.png', ['看看我明天下午有没有课，如果有空就安排我去补办校园卡，并帮我记个待办。'], { contains: ['dependent', 'query_schedule', 'query_affairs_process', 'add_todo'] })
-  await captureMemoryAndGuard()
+  await captureToday()
+  if (!process.env.ECHOGUIDE_CAPTURE_TODAY_ONLY) {
+    await capture('01-fast-personal.png', ['我今天有什么课？'], { contains: ['fast', 'query_schedule'] })
+    await capture('02-specialized-tools.png', ['校园卡丢了，补办需要什么材料？'], { contains: ['fast', 'query_affairs_process'] })
+    await capture('03-deep-rag.png', ['西电转专业通常需要满足哪些条件？请检索资料并给出来源。'], { contains: ['deep', 'knowledge_search'] })
+    await capture('04-multi-agent-dag.png', ['看看我明天下午有没有课，如果有空就安排我去补办校园卡，并帮我记个待办。'], { contains: ['dependent', 'query_schedule', 'query_affairs_process', 'add_todo'] })
+    await captureMemoryAndGuard()
+  }
   console.log(`Demo screenshots written to ${outputDir}`)
 } finally {
+  await clearDemoPersonalData().catch((error) => console.warn(`Demo 数据清理失败: ${error.message}`))
   await browser.close()
 }

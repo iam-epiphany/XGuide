@@ -62,7 +62,7 @@
     <section v-else-if="activeTab === 'inbox'" class="product-page inbox-page">
       <div v-if="!authUser" class="product-empty"><h2>先登录，再筛选与你有关的校园通知。</h2><button @click="openAuth('login')">登录</button></div>
       <template v-else>
-        <header class="inbox-hero"><div><p class="page-kicker">XGUIDE · PERSONAL ATTENTION CENTER</p><h2>先看该做什么，<br><em>再看发生什么。</em></h2><p>校园信息被整理为与你有关的事件、时机与下一步行动。</p></div><div class="inbox-hero-actions"><button class="quiet-action" @click="openProfile">{{ inboxProfileComplete ? '调整我的画像' : '完善我的画像' }}</button><button class="sync-action" @click="syncInbox" :disabled="inboxBusy">{{ inboxBusy ? '正在感知校园…' : '同步校园动态' }}</button></div></header>
+        <header class="inbox-hero"><div><p class="page-kicker">XGUIDE · PERSONAL ATTENTION CENTER</p><h2>Focus First.<br><em>Act Next.</em></h2><p>校园信息被整理为与你有关的事件、时机与下一步行动。</p></div><div class="inbox-hero-actions"><button class="quiet-action" @click="openProfile">{{ inboxProfileComplete ? '调整我的画像' : '完善我的画像' }}</button><button class="sync-action" @click="syncInbox" :disabled="inboxBusy">{{ inboxBusy ? '正在感知校园…' : '同步校园动态' }}</button></div></header>
         <div class="profile-strip"><div><b>{{ inboxProfileComplete ? '个人筛选已启用' : '公开通知模式' }}</b><span>{{ inboxProfileComplete ? '排序已结合你的身份、关注方向和事务时效。' : '完成画像后，XGuide 才能判断哪些事项真正与你有关。' }} 新推送保留 {{ inboxTtlHours }} 小时。</span></div><button class="text-action" @click="openProfile">{{ inboxProfileComplete ? '编辑' : '去设置' }} →</button></div>
         <p v-if="inboxError" class="page-error">{{ inboxError }}</p>
         <template v-if="inboxEvents.length">
