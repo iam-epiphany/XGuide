@@ -4,6 +4,7 @@
 ASGITransport 直连（零网络、CI 可跑），与 test_mcp_protocol.py 同风格
 （FAKE_KEY + asyncio.run，无 pytest-asyncio）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +23,7 @@ FAKE_KEY = "sk-test-not-used"
 
 # ── 协议对端：MCPServer 的 ASGI 包装（模拟远程 MCP server）───────────────────
 
+
 def _make_server() -> MCPServer:
     tm = MCPToolManager(api_key=FAKE_KEY)
 
@@ -31,28 +33,34 @@ def _make_server() -> MCPServer:
     async def create_issue_handler(params, context):
         return {"created": True, "number": 1}
 
-    tm.register(Tool(
-        name="search_repositories",
-        description="按关键词搜索 GitHub 仓库",
-        handler=search_handler,
-        schema={
-            "type": "object",
-            "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
-            "required": ["query"],
-        },
-    ))
-    tm.register(Tool(
-        name="create_issue",
-        description="创建 issue（写操作）",
-        handler=create_issue_handler,
-        schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
-    ))
-    tm.register(Tool(
-        name="analyze_repository",
-        description="分析仓库（未知命名，非白名单非黑名单）",
-        handler=create_issue_handler,
-        schema={"type": "object", "properties": {"repo": {"type": "string"}}},
-    ))
+    tm.register(
+        Tool(
+            name="search_repositories",
+            description="按关键词搜索 GitHub 仓库",
+            handler=search_handler,
+            schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
+                "required": ["query"],
+            },
+        )
+    )
+    tm.register(
+        Tool(
+            name="create_issue",
+            description="创建 issue（写操作）",
+            handler=create_issue_handler,
+            schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+        )
+    )
+    tm.register(
+        Tool(
+            name="analyze_repository",
+            description="分析仓库（未知命名，非白名单非黑名单）",
+            handler=create_issue_handler,
+            schema={"type": "object", "properties": {"repo": {"type": "string"}}},
+        )
+    )
     return MCPServer(tm)
 
 
@@ -68,12 +76,15 @@ def _asgi_app(server: MCPServer, status: int = 200):
                     break
         result = await server.handle(body.decode("utf-8"))
         resp_body = json.dumps(result).encode() if result is not None else b""
-        await send({
-            "type": "http.response.start",
-            "status": 202 if result is None else status,
-            "headers": [(b"content-type", b"application/json")],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 202 if result is None else status,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
         await send({"type": "http.response.body", "body": resp_body})
+
     return app
 
 
@@ -86,6 +97,7 @@ def _run(coro):
 
 
 # ── StreamableHTTPClient：握手 / 枚举 / 转发 ──────────────────────────────────
+
 
 def test_client_initialize_and_list_tools():
     client = StreamableHTTPClient("http://test", token="pat", transport=_transport(_make_server()))
@@ -118,6 +130,7 @@ def test_parse_sse_frame():
 
 
 # ── ExternalMCPSource：只读过滤 / 白名单 / 降级 ───────────────────────────────
+
 
 def test_source_registers_prefixed_readonly_tools():
     tm = MCPToolManager(api_key=FAKE_KEY)
@@ -186,18 +199,23 @@ def test_source_connection_failure_degrades():
 
 # ── expose_external_tools：加入公共工具层（任何请求可见）─────────────────────
 
+
 def test_expose_external_tools_visibility():
     tm = MCPToolManager(api_key=FAKE_KEY)
+
     # 本地工具（模拟 knowledge_search）与外部工具并存
     async def kb_handler(params, context):
         return [{"title": "本地知识"}]
-    tm.register(Tool(
-        name="knowledge_search",
-        description="搜索校园知识库",
-        handler=kb_handler,
-        schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-        effect=ToolEffect.READ,  # 显式副作用声明（fail-closed）
-    ))
+
+    tm.register(
+        Tool(
+            name="knowledge_search",
+            description="搜索校园知识库",
+            handler=kb_handler,
+            schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+            effect=ToolEffect.READ,  # 显式副作用声明（fail-closed）
+        )
+    )
     source = ExternalMCPSource("http://test", prefix="github", transport=_transport(_make_server()))
     registered = _run(source.setup(tm))
 

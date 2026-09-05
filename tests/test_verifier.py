@@ -2,6 +2,7 @@
 
 LLM 判定用 AsyncMock 伪客户端，不触网；规则校验为纯函数直测。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,7 @@ def _run(coro):
 
 # ── 规则校验 ──────────────────────────────────────────────────────────────────
 
+
 def test_citation_without_evidence_flagged():
     v = ResponseVerifier()
     result = _run(v.verify(_req(), "详见 [1]。", [], [], "fast", WRITE_TOOLS))
@@ -48,18 +50,31 @@ def test_citation_with_evidence_clean():
 
 def test_write_claim_without_tool_flagged():
     v = ResponseVerifier()
-    result = _run(v.verify(
-        _req("帮我记个待办", action=IntentAction.REQUEST),
-        "已添加待办：买饭卡。", [], [], "fast", WRITE_TOOLS,
-    ))
+    result = _run(
+        v.verify(
+            _req("帮我记个待办", action=IntentAction.REQUEST),
+            "已添加待办：买饭卡。",
+            [],
+            [],
+            "fast",
+            WRITE_TOOLS,
+        )
+    )
     assert "write_claim_without_tool" in result.flags
 
 
 def test_write_claim_with_tool_clean():
     v = ResponseVerifier()
-    result = _run(v.verify(
-        _req(), "已添加待办：买饭卡。", ["add_todo"], [], "fast", WRITE_TOOLS,
-    ))
+    result = _run(
+        v.verify(
+            _req(),
+            "已添加待办：买饭卡。",
+            ["add_todo"],
+            [],
+            "fast",
+            WRITE_TOOLS,
+        )
+    )
     assert "write_claim_without_tool" not in result.flags
 
 
@@ -79,19 +94,29 @@ def test_empty_content_skipped():
 
 # ── LLM 判定（fake client，不触网）───────────────────────────────────────────
 
+
 def _make_llm_verifier(text: str):
     client = AsyncMock()
-    client.messages.create = AsyncMock(return_value=SimpleNamespace(
-        content=[SimpleNamespace(type="text", text=text)],
-    ))
+    client.messages.create = AsyncMock(
+        return_value=SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=text)],
+        )
+    )
     return ResponseVerifier(client=client, model="m", llm_enabled=True), client
 
 
 def test_llm_check_runs_on_deep_and_ungrounded_adds_disclaimer():
     verifier, client = _make_llm_verifier('{"grounded": false, "reason": "引用无出处"}')
-    result = _run(verifier.verify(
-        _req(), "转专业需绩点 3.9。", [], [], "deep", WRITE_TOOLS,
-    ))
+    result = _run(
+        verifier.verify(
+            _req(),
+            "转专业需绩点 3.9。",
+            [],
+            [],
+            "deep",
+            WRITE_TOOLS,
+        )
+    )
     assert client.messages.create.called
     assert "llm_ungrounded" in result.flags
     assert result.disclaimer == ResponseVerifier.LLM_DISCLAIMER
@@ -116,17 +141,23 @@ def test_llm_check_skipped_on_fast_profile():
 def test_llm_check_runs_on_request_action_even_fast():
     """执行路径（REQUEST）即使 Fast profile 也做一次 LLM 判定（写操作风险路径）。"""
     verifier, client = _make_llm_verifier('{"grounded": true}')
-    result = _run(verifier.verify(
-        _req("帮我记个待办", action=IntentAction.REQUEST),
-        "已添加待办：买饭卡。", ["add_todo"], [], "fast", WRITE_TOOLS,
-    ))
+    result = _run(
+        verifier.verify(
+            _req("帮我记个待办", action=IntentAction.REQUEST),
+            "已添加待办：买饭卡。",
+            ["add_todo"],
+            [],
+            "fast",
+            WRITE_TOOLS,
+        )
+    )
     assert client.messages.create.called
     assert result.source == "rules+llm"
 
 
 def test_llm_parse_failure_fails_open():
     """LLM 输出非法 JSON → fail-open：不加免责、不阻断。"""
-    verifier, client = _make_llm_verifier("不是JSON")
+    verifier, _client = _make_llm_verifier("不是JSON")
     result = _run(verifier.verify(_req(), "你好。", [], [], "deep", WRITE_TOOLS))
     assert result.source == "rules+llm"
     assert "llm_ungrounded" not in result.flags
@@ -135,18 +166,23 @@ def test_llm_parse_failure_fails_open():
 
 # ── 编排器集成 ────────────────────────────────────────────────────────────────
 
+
 def test_orchestrator_run_attaches_verification_meta():
     """单请求路径：execution.verification 存在、规则校验生效、计数可查。"""
     orch = AgentOrchestrator(api_key=FAKE_KEY)  # 默认 LLM 判定关闭（offline 安全）
     req = Request(
-        message="你好", user_id="u1", conv_id="c1",
-        domain=IntentDomain.OTHER, action=IntentAction.QUERY,
+        message="你好",
+        user_id="u1",
+        conv_id="c1",
+        domain=IntentDomain.OTHER,
+        action=IntentAction.QUERY,
     )
 
     async def fake_execute(task_req, on_event=None):
         return AgentResponse(
             agent_type=task_req.domain.value if task_req.domain else "task_agent",
-            content="[1] 已添加待办：买饭卡。", success=True,
+            content="[1] 已添加待办：买饭卡。",
+            success=True,
         )
 
     orch._execute = fake_execute

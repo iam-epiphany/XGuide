@@ -286,7 +286,7 @@ flowchart TB
     保持顺序 --> TopK
 
     TopK --> Agent[Agent 工具调用]
-    Agent --> 引用链路[Grounding 链路<br/>retrieval-first +<br/>sentence-level citation]
+    Agent --> 引用链路[Grounding 链路<br/>retrieval-first +<br/>claim-aware citation]
 
     引用链路 --> 证据注入[证据注入<br/>编号证据 [i]]
     证据注入 --> 回答生成[回答生成]
@@ -306,7 +306,7 @@ flowchart TB
 1. **查询改写**：LLM 扩写成多角度子查询
 2. **并行召回**：ChromaDB 向量搜索，BGE Embedding 本地推理
 3. **重排序**：BGE Reranker cross-encoder 毫秒级，无信号时保持原序
-4. **Grounding**：检索优先，句级引用，证据链完整
+4. **Grounding**：检索优先，原子 Claim 级校验与引用，证据链完整
 
 ---
 

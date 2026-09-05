@@ -9,6 +9,7 @@
 
 用法：python evaluation/benchmark_report.py
 """
+
 from __future__ import annotations
 
 import json
@@ -27,17 +28,23 @@ def _read_json(path: pathlib.Path) -> dict:
 
 
 def _read_intent() -> dict:
+    """头条指标优先取独立 holdout 划分；没有才退回 train（对调参数据的乐观偏差）。
+
+    rows[mode]["split"] 标明数字来源划分，报告生成处据此展示口径。
+    """
     rows = {}
     for mode in ("pattern_only", "no_llm", "full"):
         data = _read_json(EVAL_DIR / f"intent_{mode}.json")
         if not data:
             continue
-        train = data.get("train", {})
+        split_name, split = ("holdout", data.get("holdout")) if data.get("holdout") else ("train", data.get("train"))
+        split = split or {}
         rows[mode] = {
-            "domain_accuracy": train.get("domain", {}).get("accuracy"),
-            "domain_macro_f1": train.get("domain", {}).get("macro_f1"),
-            "action_accuracy": train.get("action", {}).get("accuracy"),
-            "action_macro_f1": train.get("action", {}).get("macro_f1"),
+            "split": split_name,
+            "domain_accuracy": split.get("domain", {}).get("accuracy"),
+            "domain_macro_f1": split.get("domain", {}).get("macro_f1"),
+            "action_accuracy": split.get("action", {}).get("accuracy"),
+            "action_macro_f1": split.get("action", {}).get("macro_f1"),
             "total": data.get("total_cases"),
         }
     return rows
@@ -62,7 +69,9 @@ def _run_memory() -> dict:
     """运行确定性记忆评测（无 API 依赖）。"""
     result = subprocess.run(
         [sys.executable, str(ROOT / "evaluation" / "memory_benchmark.py")],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     try:
         out = result.stdout
@@ -113,6 +122,8 @@ def build_markdown(summary: dict) -> str:
         "",
         "标注集：202 条（6 领域 × 5 动作 + 追问 + 边界），人工审核。三档消融量化「关键词 → +Embedding → +LLM 仲裁」每档贡献：",
         "",
+        f"> 下表数字口径：{(intent.get('full', {}).get('split', 'train') == 'holdout' and '独立 holdout 留出集（优化过程不可见）') or 'train 划分（尚未生成 holdout 评测，数字对调参数据偏乐观）'}",
+        "",
         "| 档位 | 领域准确率 | 领域 Macro-F1 | 动作准确率 | 动作 Macro-F1 |",
         "|---|---:|---:|---:|---:|",
     ]
@@ -142,28 +153,32 @@ def build_markdown(summary: dict) -> str:
         "",
         "## 2. RAG 检索（链路消融）",
         "",
-        "标注集：58 条常规查询 + 16 条困难查询（校园卡办理/充值/异常/补办等相似主题竞争场景），"
-        "标注目标为知识库 17 篇文档（含同类竞争文档）。K=5：",
+        (
+            "标注集：58 条常规查询 + 16 条困难查询（校园卡办理/充值/异常/补办等相似主题竞争场景），"
+            "标注目标为知识库 17 篇文档（含同类竞争文档）。K=5："
+        ),
         "",
         "| 档位 | HitRate@5 | Recall@5 | MRR |",
         "|---|---:|---:|---:|",
     ]
     for mode in ("baseline", "rerank", "full"):
         row = retrieval.get(mode, {})
-        lines.append(
-            f"| {mode} | {_pct(row.get('hit_rate'))} | {_pct(row.get('recall'))} | {_fmt(row.get('mrr'))} |"
-        )
+        lines.append(f"| {mode} | {_pct(row.get('hit_rate'))} | {_pct(row.get('recall'))} | {_fmt(row.get('mrr'))} |")
     lines += [
         "",
-        "**边界说明**：HitRate@5 100%；MRR 受两个真实困难样本限制（口语化改写\"新校区/老校区\"→校车文档、"
-        "无调宿专文），非重排问题——重排档与 baseline 完全一致（0.7 高置信门禁：重排无判别信号时弃权，"
-        "保证不劣化），困难集上 rerank=baseline=1.0。引用正确率/忠实性由 Grounding 链路（自动预检索 + "
-        "sentence-level citation）保证（见第 3 节，口径详见 methodology 文档）。",
+        (
+            '**边界说明**：HitRate@5 100%；MRR 受两个真实困难样本限制（口语化改写"新校区/老校区"→校车文档、'
+            "无调宿专文），非重排问题——重排档与 baseline 完全一致（0.7 高置信门禁：重排无判别信号时弃权，"
+            "保证不劣化），困难集上 rerank=baseline=1.0。引用正确率/忠实性由 Grounding 链路（自动预检索 + "
+            "sentence-level citation）保证（见第 3 节，口径详见 methodology 文档）。"
+        ),
         "",
         "## 3. 端到端对话（LLM-as-Judge）",
         "",
-        "标注集：18 组场景（单轮/多轮/复合并行/DAG），golden_answer 要点式标注、人工审核。"
-        "生成模型与 Judge 模型均为 deepseek-v4-flash（可配置 EVAL_JUDGE_* 独立 Judge）：",
+        (
+            "标注集：18 组场景（单轮/多轮/复合并行/DAG），golden_answer 要点式标注、人工审核。"
+            "生成模型与 Judge 模型均为 deepseek-v4-flash（可配置 EVAL_JUDGE_* 独立 Judge）："
+        ),
         "",
     ]
     if dialog:
@@ -239,9 +254,13 @@ def main() -> int:
     summary = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S %z"),
         "code_commit": subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
-            capture_output=True, text=True, check=False,
-        ).stdout.strip() or "unknown",
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        or "unknown",
         "intent": _read_intent(),
         "retrieval": _read_retrieval(),
         "dialog": _read_json(EVAL_DIR / "e2e_dialog.json"),
@@ -250,10 +269,10 @@ def main() -> int:
     }
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    (DOCS_DIR / "benchmark-report.md").write_text(
-        build_markdown(summary), encoding="utf-8")
+    (DOCS_DIR / "benchmark-report.md").write_text(build_markdown(summary), encoding="utf-8")
     (EVAL_DIR / "benchmark-summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"报告已生成：{DOCS_DIR / 'benchmark-report.md'}")
     return 0
 

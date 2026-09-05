@@ -10,6 +10,7 @@ EchoGuide Agent Runtime（Harness 收口层）。
 职责边界：业务 Agent 保持薄；可靠性（Guard、预算、Trace、Skill 解析）由
 Runtime 保证。HTTP 层（Guard ASGI、语义缓存、记忆读写）不迁移到本层。
 """
+
 from runtime.context import RunContext
 from runtime.middleware import (
     BudgetExceeded,

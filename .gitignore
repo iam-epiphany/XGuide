@@ -33,12 +33,17 @@ node_modules/
 /简历/
 /resumes/
 
-# 本地运行数据（公开样例与评测数据可版本化）
+# 本地运行数据（公开样例与评测基准可版本化；运行产物不入库）
 data/chroma/
 data/echoguide.db
 data/memory.db
 data/eval/results/
+data/eval/chroma/
+data/eval/memory.db
+# error_analysis 下的 json 是分析脚本的运行产物（evaluation/error_analysis/*.py --out 默认路径）
+data/eval/error_analysis/
 logs/
+backups/
 
 # IDE
 .idea/
@@ -49,9 +54,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
-
-# Docker 构建产物
-build-image*.sh
 
 # ChromaDB 本地数据
 *.sqlite3
@@ -71,3 +73,6 @@ evaluation/embedding_compare_result.json
 *.cache
 .cache/
 *.pid
+
+# 覆盖率运行产物
+.coverage

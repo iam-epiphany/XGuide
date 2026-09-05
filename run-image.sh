@@ -147,9 +147,9 @@ run_container() {
         env_file="--env-file $env_file"
     fi
 
-    # 基础配置
+    # 基础配置（应用容器自带 /metrics，无需映射容器内不存在的 Prometheus 9090）
     local image_tag="${REGISTRY}${IMAGE_NAME}:${VERSION}"
-    local default_ports="-p ${API_PORT}:8000 -p ${PROMETHEUS_PORT}:9090"
+    local default_ports="-p ${API_PORT}:8000"
     local default_volumes="-v ${DATA_DIR}:/app/data -v ${LOGS_DIR}:/app/logs -v ${CONFIG_DIR}:/app/config"
 
     # 根据模式调整配置
@@ -196,21 +196,17 @@ run_container() {
         docker rm "$container_name" 2>/dev/null || true
     fi
 
-    # 运行容器
-    eval $run_cmd
+    # 运行容器（经 read -ra 分词执行，避免 eval 对变量做二次展开）
+    local run_args=()
+    read -ra run_args <<< "$run_cmd"
+    "${run_args[@]}"
 
-    if [ $? -eq 0 ]; then
-        print_info "✓ 容器启动成功"
-        print_info "API地址: http://localhost:${API_PORT}"
-        print_info "Prometheus: http://localhost:${PROMETHEUS_PORT}"
+    print_info "✓ 容器启动成功"
+    print_info "API地址: http://localhost:${API_PORT}"
 
-        if [ "$detach" = true ]; then
-            print_info "容器在后台运行"
-            print_info "查看日志: ./run-image.sh logs"
-        fi
-    else
-        print_error "✗ 容器启动失败"
-        exit 1
+    if [ "$detach" = true ]; then
+        print_info "容器在后台运行"
+        print_info "查看日志: ./run-image.sh logs"
     fi
 }
 

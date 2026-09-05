@@ -3,6 +3,7 @@
 Adapter 只负责“从哪里发现通知、怎样取得正文”；Radar 不再知道具体网站结构。
 后续学院/学工/就业等公开站点只需增加一个 Adapter，不影响事件、画像或个人计划层。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,7 +42,14 @@ class PublicSourceAdapter:
     async def discover(self, client: httpx.AsyncClient) -> List[NoticeLink]:
         raise NotImplementedError
 
-    async def fetch(self, client: httpx.AsyncClient, link: NoticeLink, *, etag: Optional[str] = None, last_modified: Optional[str] = None) -> NoticePage:
+    async def fetch(
+        self,
+        client: httpx.AsyncClient,
+        link: NoticeLink,
+        *,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None,
+    ) -> NoticePage:
         raise NotImplementedError
 
 
@@ -117,6 +125,23 @@ def html_text(html: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"(?s)<[^>]+>", " ", html)).strip()
 
 
+def decode_response_text(response: httpx.Response) -> str:
+    """按响应头 / HTML meta 探测编码解码正文。
+
+    httpx 默认按 utf-8 解码 text；不少高校老站点是 GB2312/GBK，
+    乱码后标题匹配不到任何通知 → 整轮静默同步 0 条，且结果里连 failed 都不是。
+    """
+    if response.charset_encoding:
+        return response.text
+    match = re.search(rb'charset\s*=\s*["\']?([\w-]+)', response.content[:2048], re.I)
+    if match:
+        try:
+            return response.content.decode(match.group(1).decode("ascii"), errors="replace")
+        except (LookupError, UnicodeDecodeError):
+            pass
+    return response.text  # 无任何编码声明 → 维持 httpx 默认（utf-8）
+
+
 def _listing_date(text: str) -> Optional[str]:
     """从列表项的日期文本规范化为 ISO 日期。"""
     match = re.search(r"(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})", text)
@@ -151,35 +176,52 @@ class HtmlNoticeAdapter(PublicSourceAdapter):
         response = await client.get(self.listing_url)
         response.raise_for_status()
         parser = _AnchorParser()
-        parser.feed(response.text)
+        parser.feed(decode_response_text(response))
         host = urlparse(self.listing_url).netloc
         links: List[NoticeLink] = []
         seen = set()
         for href, title, listing_text in parser.links:
             title = _notice_title(title)
             url = urljoin(self.listing_url, href)
-            if (not title or len(title) < 8 or urlparse(url).netloc != host or url.rstrip("/") == self.listing_url.rstrip("/")
-                    or title in {"更多", "首页", "详情", self.name} or url in seen):
+            if (
+                not title
+                or len(title) < 8
+                or urlparse(url).netloc != host
+                or url.rstrip("/") == self.listing_url.rstrip("/")
+                or title in {"更多", "首页", "详情", self.name}
+                or url in seen
+            ):
                 continue
             if any(value in url.lower() for value in ("javascript:", "login", "register")):
                 continue
             if self.include_url_patterns and not any(pattern.search(url) for pattern in self.include_url_patterns):
                 continue
-            if self.include_title_patterns and not any(pattern.search(title) for pattern in self.include_title_patterns):
+            if self.include_title_patterns and not any(
+                pattern.search(title) for pattern in self.include_title_patterns
+            ):
                 continue
             seen.add(url)
-            links.append(NoticeLink(
-                url=url,
-                title=title,
-                source_name=self.name,
-                source_category=self.category,
-                published_at=_listing_date(listing_text),
-            ))
+            links.append(
+                NoticeLink(
+                    url=url,
+                    title=title,
+                    source_name=self.name,
+                    source_category=self.category,
+                    published_at=_listing_date(listing_text),
+                )
+            )
             if len(links) >= self.max_links:
                 break
         return links
 
-    async def fetch(self, client: httpx.AsyncClient, link: NoticeLink, *, etag: Optional[str] = None, last_modified: Optional[str] = None) -> NoticePage:
+    async def fetch(
+        self,
+        client: httpx.AsyncClient,
+        link: NoticeLink,
+        *,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None,
+    ) -> NoticePage:
         headers = {}
         if etag:
             headers["If-None-Match"] = etag
@@ -189,7 +231,12 @@ class HtmlNoticeAdapter(PublicSourceAdapter):
         if response.status_code == 304:
             return NoticePage(link=link, body="", etag=etag, last_modified=last_modified, not_modified=True)
         response.raise_for_status()
-        return NoticePage(link=link, body=html_text(response.text)[:12000], etag=response.headers.get("ETag"), last_modified=response.headers.get("Last-Modified"))
+        return NoticePage(
+            link=link,
+            body=html_text(decode_response_text(response))[:12000],
+            etag=response.headers.get("ETag"),
+            last_modified=response.headers.get("Last-Modified"),
+        )
 
 
 class CPIPCCompetitionAdapter(PublicSourceAdapter):
@@ -213,9 +260,10 @@ class CPIPCCompetitionAdapter(PublicSourceAdapter):
         schedule_url = await self._schedule_url(client)
         response = await client.get(schedule_url)
         response.raise_for_status()
-        year = self._schedule_year(response.text)
-        published_at = self._published_at(response.text)
-        rows = self._schedule_rows(response.text)
+        html = decode_response_text(response)
+        year = self._schedule_year(html)
+        published_at = self._published_at(html)
+        rows = self._schedule_rows(html)
         links: List[NoticeLink] = []
         self._bodies = {}
         for position, (competition, registration, submission, final) in enumerate(rows, start=1):
@@ -237,7 +285,14 @@ class CPIPCCompetitionAdapter(PublicSourceAdapter):
             links.append(NoticeLink(source_url, title, self.name, self.category, published_at))
         return links
 
-    async def fetch(self, client: httpx.AsyncClient, link: NoticeLink, *, etag: Optional[str] = None, last_modified: Optional[str] = None) -> NoticePage:
+    async def fetch(
+        self,
+        client: httpx.AsyncClient,
+        link: NoticeLink,
+        *,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None,
+    ) -> NoticePage:
         # discover 已抓取并解析该公开赛程页，避免为同一张表重复请求 19 次。
         body = self._bodies.get(link.url)
         if body is None:
@@ -317,17 +372,23 @@ def default_public_adapters() -> List[PublicSourceAdapter]:
     return [
         # 这些公开页面均提供服务端渲染的通知列表；不要从门户首页泛抓导航和专题链接。
         HtmlNoticeAdapter(
-            name="西电新闻网", category="school", listing_url="https://news.xidian.edu.cn/",
+            name="西电新闻网",
+            category="school",
+            listing_url="https://news.xidian.edu.cn/",
             include_url_patterns=(r"/info/\d+/\d+\.htm$",),
             include_title_patterns=(r"通知|公告|公示|报名|申请|招聘|选课",),
         ),
         HtmlNoticeAdapter(
-            name="本科生院", category="academic", listing_url="https://jwc.xidian.edu.cn/tzgg.htm",
+            name="本科生院",
+            category="academic",
+            listing_url="https://jwc.xidian.edu.cn/tzgg.htm",
             include_url_patterns=(r"/info/1012/\d+\.htm$",),
         ),
         HtmlNoticeAdapter(
             # 该站的分类页由前端异步加载，首页服务端已输出同一份通知公告列表。
-            name="西电就业信息网", category="employment", listing_url="https://job.xidian.edu.cn/",
+            name="西电就业信息网",
+            category="employment",
+            listing_url="https://job.xidian.edu.cn/",
             include_url_patterns=(r"/news/view/aid/\d+/tag/tzgg$",),
         ),
         CPIPCCompetitionAdapter(),

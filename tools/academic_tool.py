@@ -1,4 +1,5 @@
 """学业领域：确定性加权计算工具（公共工具层）。"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -30,12 +31,14 @@ async def calculate_weighted_score_handler(params: Dict[str, Any], context: Any)
         contribution = credits * score
         total_credits += credits
         weighted_sum += contribution
-        contributions.append({
-            "name": name,
-            "credits": round(credits, 2),
-            "score": round(score, 2),
-            "weighted_contribution": round(contribution, 2),
-        })
+        contributions.append(
+            {
+                "name": name,
+                "credits": round(credits, 2),
+                "score": round(score, 2),
+                "weighted_contribution": round(contribution, 2),
+            }
+        )
 
     return {
         "formula": "Σ(课程成绩×课程学分)/Σ课程学分",

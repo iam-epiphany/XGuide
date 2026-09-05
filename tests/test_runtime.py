@@ -2,6 +2,7 @@
 Agent Runtime（runtime/ 包）离线测试：RunState / ExecutionPolicy / MiddlewareChain /
 AgentRuntime / 四个具体中间件 / 编排器集成。全部不触发真实 LLM 与外部服务。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,6 +52,7 @@ def _req(message: str, domain=None, action=None) -> Request:
 
 
 # ── RunState / ExecutionPolicy ───────────────────────────────────────────────
+
 
 def test_run_state_summary_and_elapsed():
     state = RunState(request_id="r1", user_id="u1", message="hi")
@@ -104,6 +106,7 @@ def test_execution_policy_defaults_and_env_overrides(monkeypatch):
 
 
 # ── MiddlewareChain ──────────────────────────────────────────────────────────
+
 
 class _Recording(RuntimeMiddleware):
     name = "rec"
@@ -201,6 +204,7 @@ def test_middleware_chain_after_errors_do_not_mask():
 
 # ── AgentRuntime.run ─────────────────────────────────────────────────────────
 
+
 def test_runtime_run_calls_core_and_returns_result():
     runtime = AgentRuntime(middlewares=[])
     state = RunState(request_id="r1")
@@ -267,6 +271,7 @@ def test_runtime_run_budget_exceeded_inside_core():
 
 # ── 具体中间件 ───────────────────────────────────────────────────────────────
 
+
 def test_trace_middleware_aligns_with_request_trace():
     from core.tracing import begin_trace, current_trace, end_trace
 
@@ -330,8 +335,11 @@ def test_skill_middleware_caches_by_message_and_prompt_uses_cache():
 
     req = _req("转专业政策是什么")
     state = RunState(
-        request_id="r1", user_id="u1", conv_id="c1",
-        message=req.message, policy=orch.runtime.policy,
+        request_id="r1",
+        user_id="u1",
+        conv_id="c1",
+        message=req.message,
+        policy=orch.runtime.policy,
     )
     req.state = state
 
@@ -352,6 +360,7 @@ def test_skill_middleware_caches_by_message_and_prompt_uses_cache():
 
 
 # ── 编排器集成 ───────────────────────────────────────────────────────────────
+
 
 def test_orchestrator_run_wires_runtime_state():
     orch = AgentOrchestrator(api_key=FAKE_KEY)
@@ -386,10 +395,7 @@ def test_task_executor_respects_max_tasks_cap():
 
     executor = TaskExecutor(run_task)
     req = _req("帮我同时查一下校车时刻表、校园卡办理流程和加权成绩")
-    tasks = [
-        Task(task_id=f"t{i}", domain=IntentDomain.CAMPUS_LIFE, goal="g", message="m")
-        for i in range(3)
-    ]
+    tasks = [Task(task_id=f"t{i}", domain=IntentDomain.CAMPUS_LIFE, goal="g", message="m") for i in range(3)]
 
     with pytest.raises(ValueError, match="上限 2"):
         asyncio.run(executor.execute(req, tasks, max_tasks=2))

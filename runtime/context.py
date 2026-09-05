@@ -7,6 +7,7 @@ RunContext —— 单次运行的全量上下文：状态 + 策略 + 服务 + �
   - services：共享组件（skill_manager、req 等），由触发方注入
   - on_event：SSE 过程事件透传
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from typing import Any, Callable, Dict, Optional
 class RunContext:
     """一次 Agent 运行的上下文（中间件与执行体共享）。"""
 
-    state: Any                                        # RunState
-    policy: Any                                       # ExecutionPolicy
+    state: Any  # RunState
+    policy: Any  # ExecutionPolicy
     services: Dict[str, Any] = field(default_factory=dict)
     on_event: Optional[Callable[[Dict[str, Any]], Any]] = None  # SSE 过程事件

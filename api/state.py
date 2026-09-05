@@ -5,6 +5,7 @@ lifespan 与交互式 CLI 共用 _build_runtime()，避免两处各自初始化�
 （此前 CLI 缺少工具注册/缓存/monitor，且默认值不一致）。各 router 从本模块
 读取全局组件（state._orchestrator 等），保证测试打桩与真实运行读写同一对象。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,16 +29,18 @@ if _ROOT not in sys.path:
 
 # ── 全局组件（_build_runtime 中初始化）──────────────────────────────────────
 _orchestrator = None
-_memory       = None
+_memory = None
 _tool_manager = None
-_monitor      = None
-_evaluator    = None
+_monitor = None
+_evaluator = None
 _skill_manager = None
 _semantic_cache = None
 _personal_service = None
 _campus_store = None
 _campus_radar = None
-_kb           = None
+_kb = None
+_briefing_service = None
+_schedule_parser = None
 
 # 后台任务跟踪：防止 fire-and-forget 任务被 GC 回收或异常无人检索
 _bg_tasks: set = set()
@@ -110,8 +113,8 @@ def _anthropic_cfg() -> Dict[str, Any]:
     if not key:
         raise RuntimeError("未设置 ANTHROPIC_API_KEY")
     cfg: Dict[str, Any] = {
-        "api_key":  key,
-        "model":    os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+        "api_key": key,
+        "model": os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
     }
     base_url = os.getenv("ANTHROPIC_BASE_URL", "").strip()
     if base_url:
@@ -129,6 +132,7 @@ def _build_runtime() -> None:
     """构造运行期组件并注册工具。"""
     global _orchestrator, _memory, _tool_manager, _monitor, _evaluator, _skill_manager
     global _personal_service, _campus_store, _campus_radar, _kb, _semantic_cache
+    global _briefing_service, _schedule_parser
 
     from agents.agent_orchestrator import AgentOrchestrator
     from campus.extractor import CampusEventExtractor
@@ -169,7 +173,9 @@ def _build_runtime() -> None:
     cfg = _anthropic_cfg()
     logger.info(
         "执行配置: fast=%s deep=%s base_url=%s",
-        cfg["fast_model"], cfg["deep_model"], cfg.get("base_url", "(官方)"),
+        cfg["fast_model"],
+        cfg["deep_model"],
+        cfg.get("base_url", "(官方)"),
     )
 
     # Skills：启动时从目录加载业务能力说明，并在 Agent 调用 LLM 时动态注入。
@@ -233,246 +239,326 @@ def _build_runtime() -> None:
 
     def knowledge_fallback(params: Dict[str, Any], context: Optional[Dict[str, Any]], error: str):
         query = params.get("query", "")
-        return [{
-            "title": "知识库降级结果",
-            "content": f"知识库暂时不可用，未能完成对“{query}”的语义检索。请稍后重试，或联系辅导员/教务老师确认。",
-            "score": 0.0,
-            "fallback": True,
-            "error": error,
-        }]
+        return [
+            {
+                "title": "知识库降级结果",
+                "content": f"知识库暂时不可用，未能完成对“{query}”的语义检索。请稍后重试，或联系辅导员/教务老师确认。",
+                "score": 0.0,
+                "fallback": True,
+                "error": error,
+            }
+        ]
 
-    _tool_manager.register(Tool(
-        name="knowledge_search",
-        description="搜索西电校园知识库（基于 ChromaDB 向量检索），返回相关文档片段",
-        handler=_kb.search_handler,
-        schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "检索查询（可带领域词）"},
-                "top_k": {"type": "integer", "description": "返回条数，默认 5"},
-                "min_score": {"type": "number", "description": "相关性阈值，默认 0.25"},
-                "domain": {"type": "string", "description": "领域过滤：academic/campus_life/affairs/it_help"},
+    _tool_manager.register(
+        Tool(
+            name="knowledge_search",
+            description="搜索西电校园知识库（基于 ChromaDB 向量检索），返回相关文档片段",
+            handler=_kb.search_handler,
+            schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "检索查询（可带领域词）"},
+                    "top_k": {"type": "integer", "description": "返回条数，默认 5"},
+                    "min_score": {"type": "number", "description": "相关性阈值，默认 0.25"},
+                    "domain": {"type": "string", "description": "领域过滤：academic/campus_life/affairs/it_help"},
+                },
+                "required": ["query"],
             },
-            "required": ["query"],
-        },
-        cache_ttl=300.0,
-        supports_rerank=True,
-        use_rewrite=True,  # Agent 调用 knowledge_search 也走「改写→并行召回→去重→重排」链路（与 /search 一致）
-        fallback=knowledge_fallback,
-        effect=ToolEffect.READ,
-    ))
+            cache_ttl=300.0,
+            supports_rerank=True,
+            use_rewrite=True,  # Agent 调用 knowledge_search 也走「改写→并行召回→去重→重排」链路（与 /search 一致）
+            fallback=knowledge_fallback,
+            effect=ToolEffect.READ,
+        )
+    )
 
-    _tool_manager.register(Tool(
-        name="calculate_weighted_score",
-        description="按 Σ(成绩×学分)/Σ学分 计算加权学分成绩；这不是官方 GPA 换算",
-        handler=calculate_weighted_score_handler,
-        schema={
-            "type": "object",
-            "properties": {
-                "courses": {
-                    "type": "array",
-                    "description": "课程数组，每项包含 name、credits、score",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "credits": {"type": "number"},
-                            "score": {"type": "number"},
+    _tool_manager.register(
+        Tool(
+            name="calculate_weighted_score",
+            description="按 Σ(成绩×学分)/Σ学分 计算加权学分成绩；这不是官方 GPA 换算",
+            handler=calculate_weighted_score_handler,
+            schema={
+                "type": "object",
+                "properties": {
+                    "courses": {
+                        "type": "array",
+                        "description": "课程数组，每项包含 name、credits、score",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "credits": {"type": "number"},
+                                "score": {"type": "number"},
+                            },
+                            "required": ["credits", "score"],
                         },
-                        "required": ["credits", "score"],
                     },
                 },
+                "required": ["courses"],
             },
-            "required": ["courses"],
-        },
-        cache_ttl=0.0,
-        effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="query_affairs_process",
-        description="查询版本化校园办事流程，包括材料、步骤、部门、来源与更新时间",
-        handler=query_affairs_process_handler,
-        schema={
-            "type": "object",
-            "properties": {
-                "service": {"type": "string", "description": "事项名称，如校园卡补办/请假/在读证明/缓考"},
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="query_affairs_process",
+            description="查询版本化校园办事流程，包括材料、步骤、部门、来源与更新时间",
+            handler=query_affairs_process_handler,
+            schema={
+                "type": "object",
+                "properties": {
+                    "service": {"type": "string", "description": "事项名称，如校园卡补办/请假/在读证明/缓考"},
+                },
+                "required": ["service"],
             },
-            "required": ["service"],
-        },
-        cache_ttl=300.0,
-        effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="diagnose_it_issue",
-        description="使用确定性诊断树排查校园网、VPN、统一身份认证和教务系统故障",
-        handler=diagnose_it_issue_handler,
-        schema={
-            "type": "object",
-            "properties": {
-                "system": {"type": "string", "description": "校园网/VPN/统一身份认证/教务系统"},
-                "symptom": {"type": "string", "description": "故障现象"},
-                "error_code": {"type": "string", "description": "可选错误码"},
-                "network": {"type": "string", "description": "可选网络环境"},
+            cache_ttl=300.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="diagnose_it_issue",
+            description="使用确定性诊断树排查校园网、VPN、统一身份认证和教务系统故障",
+            handler=diagnose_it_issue_handler,
+            schema={
+                "type": "object",
+                "properties": {
+                    "system": {"type": "string", "description": "校园网/VPN/统一身份认证/教务系统"},
+                    "symptom": {"type": "string", "description": "故障现象"},
+                    "error_code": {"type": "string", "description": "可选错误码"},
+                    "network": {"type": "string", "description": "可选网络环境"},
+                },
             },
-        },
-        cache_ttl=0.0,
-        effect=ToolEffect.READ,
-    ))
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
 
     # ── 个人数据中心（课表 / 待办 / DDL，按 user_id 隔离，SQLite 持久化）──
     _personal_service = PersonalService(PersonalStore())
     logger.info("个人数据中心已就绪: %s", _personal_service.store.db_path)
-    _campus_radar = CampusRadar(_personal_service.store, extractor=CampusEventExtractor(client=_tool_manager._client, model=_tool_manager._model, gateway=_gateway))
+    _campus_radar = CampusRadar(
+        _personal_service.store,
+        extractor=CampusEventExtractor(client=_tool_manager._client, model=_tool_manager._model, gateway=_gateway),
+    )
     logger.info("校园通知雷达已就绪（公开源 %s 个）", len(_campus_radar.adapters))
 
-    _tool_manager.register(Tool(
-        name="query_schedule",
-        description="查询用户个人课程表（按 user_id 隔离）。date 支持：今天/明天/后天/周X/星期X/YYYY-MM-DD，返回当天课程列表（含时间与地点）",
-        handler=with_service(query_schedule_handler, personal_service=_personal_service),
-        schema={
-            "type": "object",
-            "properties": {
-                "date": {"type": "string", "description": "日期表达式，默认今天，如：今天/明天/周三/2026-09-14"},
+    # LLM 简报服务（Today 晨报 / Inbox 摘要 / 空档建议）与课表文本解析：
+    # 与 extractor 共用同一 client/model/gateway，LLM 未配置时各自优雅降级。
+    from personal.briefing import BriefingService
+    from personal.schedule_parser import ScheduleTextParser
+
+    _briefing_service = BriefingService(
+        client=_tool_manager._client, model=_tool_manager._model, gateway=_gateway, store=_personal_service.store
+    )
+    _schedule_parser = ScheduleTextParser(
+        client=_tool_manager._client, model=_tool_manager._model, gateway=_gateway
+    )
+    logger.info("LLM 简报与课表文本解析服务已就绪")
+
+    _tool_manager.register(
+        Tool(
+            name="query_schedule",
+            description="查询用户个人课程表（按 user_id 隔离）。date 支持：今天/明天/后天/周X/星期X/YYYY-MM-DD，返回当天课程列表（含时间与地点）",
+            handler=with_service(query_schedule_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "日期表达式，默认今天，如：今天/明天/周三/2026-09-14"},
+                },
             },
-        },
-        cache_ttl=0.0,  # 个人数据实时查询，不缓存（缓存 key 不含 user_id）
-        effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="query_todo",
-        description="查询用户的待办清单（按 user_id 隔离）。status 支持 open/done/all",
-        handler=with_service(query_todo_handler, personal_service=_personal_service),
-        schema={
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "description": "open（未完成，默认）/ done / all"},
-                "kinds": {"type": "array", "items": {"type": "string"}, "description": "过滤类型：todo/ddl/exam"},
+            cache_ttl=0.0,  # 个人数据实时查询，不缓存（缓存 key 不含 user_id）
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="query_todo",
+            description="查询用户的待办清单（按 user_id 隔离）。status 支持 open/done/all",
+            handler=with_service(query_todo_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "open（未完成，默认）/ done / all"},
+                    "kinds": {"type": "array", "items": {"type": "string"}, "description": "过滤类型：todo/ddl/exam"},
+                },
             },
-        },
-        cache_ttl=0.0,
-        effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="query_free_time",
-        description="查询某天的个人空闲时间段。date 支持 今天/明天/周X/YYYY-MM-DD。",
-        handler=with_service(query_free_time_handler, personal_service=_personal_service),
-        schema={"type": "object", "properties": {"date": {"type": "string", "description": "日期表达式，默认今天"}}},
-        cache_ttl=0.0, effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="add_todo",
-        description="新增待办/DDL/考试安排。kind: todo（待办，默认）/ ddl（截止任务）/ exam（考试）；due_at 为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM",
-        handler=with_service(add_todo_handler, personal_service=_personal_service),
-        schema={
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "事项内容（必填）"},
-                "kind": {"type": "string", "description": "todo/ddl/exam，默认 todo"},
-                "due_at": {"type": "string", "description": "截止/考试时间，如 2026-09-14 或 2026-09-14 09:00"},
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="query_free_time",
+            description="查询某天的个人空闲时间段。date 支持 今天/明天/周X/YYYY-MM-DD。",
+            handler=with_service(query_free_time_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {"date": {"type": "string", "description": "日期表达式，默认今天"}},
             },
-            "required": ["content"],
-        },
-        cache_ttl=0.0,
-        effect=ToolEffect.WRITE,  # 状态修改类工具：显式副作用声明（fail-closed）
-    ))
-    _tool_manager.register(Tool(
-        name="complete_todo",
-        description="把待办标记为完成（done=true）或恢复未完成（done=false），id 为待办编号",
-        handler=with_service(complete_todo_handler, personal_service=_personal_service),
-        schema={
-            "type": "object",
-            "properties": {
-                "id": {"type": "integer", "description": "待办 id（必填）"},
-                "done": {"type": "boolean", "description": "true=完成（默认）/ false=恢复"},
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="add_todo",
+            description="新增待办/DDL/考试安排。kind: todo（待办，默认）/ ddl（截止任务）/ exam（考试）；due_at 为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM",
+            handler=with_service(add_todo_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "事项内容（必填）"},
+                    "kind": {"type": "string", "description": "todo/ddl/exam，默认 todo"},
+                    "due_at": {
+                        "type": "string",
+                        "description": "截止/考试时间，严格用 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM'，如 2026-09-14；相对时间（如'周三下午'）必须先换算成具体日期",
+                    },
+                },
+                "required": ["content"],
             },
-            "required": ["id"],
-        },
-        cache_ttl=0.0,
-        effect=ToolEffect.WRITE,  # 状态修改类工具：显式副作用声明（fail-closed）
-    ))
-    _tool_manager.register(Tool(
-        name="update_todo",
-        description="修改待办/DDL/考试；传入 id 和要改的 content、kind 或 due_at。",
-        handler=with_service(update_todo_handler, personal_service=_personal_service),
-        schema={"type": "object", "properties": {"id": {"type": "integer"}, "content": {"type": "string"}, "kind": {"type": "string"}, "due_at": {"type": "string"}}, "required": ["id"]},
-        cache_ttl=0.0, effect=ToolEffect.WRITE,
-    ))
-    _tool_manager.register(Tool(
-        name="delete_todo",
-        description="删除待办/DDL/考试，需传入 id。",
-        handler=with_service(delete_todo_handler, personal_service=_personal_service),
-        schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
-        cache_ttl=0.0, effect=ToolEffect.WRITE,
-    ))
-    _tool_manager.register(Tool(
-        name="query_ddl",
-        description="查询用户的考试与 DDL 安排（按 user_id 隔离），返回未来 horizon_days 天内的倒计时列表（含今天到期与已过期未完成）",
-        handler=with_service(query_ddl_handler, personal_service=_personal_service),
-        schema={
-            "type": "object",
-            "properties": {
-                "horizon_days": {"type": "integer", "description": "查询范围天数，默认 30"},
+            cache_ttl=0.0,
+            effect=ToolEffect.WRITE,  # 状态修改类工具：显式副作用声明（fail-closed）
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="complete_todo",
+            description="把待办标记为完成（done=true）或恢复未完成（done=false），id 为待办编号",
+            handler=with_service(complete_todo_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "待办 id（必填）"},
+                    "done": {"type": "boolean", "description": "true=完成（默认）/ false=恢复"},
+                },
+                "required": ["id"],
             },
-        },
-        cache_ttl=0.0,
-        effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="query_campus_events",
-        description="查询与当前用户画像相关的校园公开通知；可按 query 过滤竞赛、奖学金、就业等，返回通知 id、截止、要求、材料、行动和官方来源。",
-        handler=with_service(query_campus_events_handler, campus_radar=_campus_radar, personal_service=_personal_service),
-        schema={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}}, cache_ttl=0.0, effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="get_campus_event",
-        description="按通知 id 读取 Campus Event 详情，包括截止、要求、材料、行动与官方来源。",
-        handler=with_service(get_campus_event_handler, campus_radar=_campus_radar),
-        schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}, cache_ttl=0.0, effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="create_action_plan",
-        description="依据某条 Campus Event 中明确列出的材料和行动生成可追溯个人行动计划；不会编造通知未提供的步骤。",
-        handler=with_service(create_action_plan_handler, campus_radar=_campus_radar, personal_service=_personal_service),
-        schema={"type": "object", "properties": {"event_id": {"type": "integer"}}, "required": ["event_id"]}, cache_ttl=0.0, effect=ToolEffect.WRITE,
-    ))
+            cache_ttl=0.0,
+            effect=ToolEffect.WRITE,  # 状态修改类工具：显式副作用声明（fail-closed）
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="update_todo",
+            description="修改待办/DDL/考试；传入 id 和要改的 content、kind 或 due_at。",
+            handler=with_service(update_todo_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "content": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "due_at": {"type": "string"},
+                },
+                "required": ["id"],
+            },
+            cache_ttl=0.0,
+            effect=ToolEffect.WRITE,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="delete_todo",
+            description="删除待办/DDL/考试，需传入 id。",
+            handler=with_service(delete_todo_handler, personal_service=_personal_service),
+            schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+            cache_ttl=0.0,
+            effect=ToolEffect.WRITE,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="query_ddl",
+            description="查询用户的考试与 DDL 安排（按 user_id 隔离），返回未来 horizon_days 天内的倒计时列表（含今天到期与已过期未完成）",
+            handler=with_service(query_ddl_handler, personal_service=_personal_service),
+            schema={
+                "type": "object",
+                "properties": {
+                    "horizon_days": {"type": "integer", "description": "查询范围天数，默认 30"},
+                },
+            },
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="query_campus_events",
+            description="查询与当前用户画像相关的校园公开通知；可按 query 过滤竞赛、奖学金、就业等，返回通知 id、截止、要求、材料、行动和官方来源。",
+            handler=with_service(
+                query_campus_events_handler, campus_radar=_campus_radar, personal_service=_personal_service
+            ),
+            schema={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}},
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="get_campus_event",
+            description="按通知 id 读取 Campus Event 详情，包括截止、要求、材料、行动与官方来源。",
+            handler=with_service(get_campus_event_handler, campus_radar=_campus_radar),
+            schema={"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+            cache_ttl=0.0,
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="create_action_plan",
+            description="依据某条 Campus Event 中明确列出的材料和行动生成可追溯个人行动计划；不会编造通知未提供的步骤。",
+            handler=with_service(
+                create_action_plan_handler, campus_radar=_campus_radar, personal_service=_personal_service
+            ),
+            schema={"type": "object", "properties": {"event_id": {"type": "integer"}}, "required": ["event_id"]},
+            cache_ttl=0.0,
+            effect=ToolEffect.WRITE,
+        )
+    )
 
     # ── 结构化公开信息（校车/楼宇/场馆/图书馆，data/public/*.json）──
     _campus_store = CampusInfoStore()
     logger.info("校园公开信息已就绪: %s", _campus_store.load_status)
-    _tool_manager.register(Tool(
-        name="query_campus_info",
-        description=(
-            "查询西电校园公开信息（结构化数据）。category: auto（汇总全部公开数据）/ shuttle（校车，返回下一班及剩余分钟，"
-            "keyword 可传方向如'南→北'）/ buildings（楼宇，keyword 传楼名如'信远楼'）/ "
-            "venues（运动场馆，keyword 可传场馆名）/ library（图书馆开放时间）。数据暂未录入时返回提示"
-        ),
-        handler=with_service(campus_info_handler, campus_store=_campus_store),
-        schema={
-            "type": "object",
-            "properties": {
-                "category": {"type": "string", "description": "auto/shuttle/buildings/venues/library"},
-                "keyword": {"type": "string", "description": "校车方向或楼名/场馆名"},
+    _tool_manager.register(
+        Tool(
+            name="query_campus_info",
+            description=(
+                "查询西电校园公开信息（结构化数据）。category: auto（汇总全部公开数据）/ shuttle（校车，返回下一班及剩余分钟，"
+                "keyword 可传方向如'南→北'）/ buildings（楼宇，keyword 传楼名如'信远楼'）/ "
+                "venues（运动场馆，keyword 可传场馆名）/ library（图书馆开放时间）。数据暂未录入时返回提示"
+            ),
+            handler=with_service(campus_info_handler, campus_store=_campus_store),
+            schema={
+                "type": "object",
+                "properties": {
+                    "category": {"type": "string", "description": "auto/shuttle/buildings/venues/library"},
+                    "keyword": {"type": "string", "description": "校车方向或楼名/场馆名"},
+                },
+                "required": ["category"],
             },
-            "required": ["category"],
-        },
-        cache_ttl=0.0,  # 校车查询依赖当前时间，不缓存
-        effect=ToolEffect.READ,
-    ))
-    _tool_manager.register(Tool(
-        name="get_weather",
-        description="查询天气（Open-Meteo 免费数据源）。place: 南校区/北校区/西安，默认南校区；days: 预报天数 1-7，默认 3",
-        handler=weather_handler,
-        schema={
-            "type": "object",
-            "properties": {
-                "place": {"type": "string", "description": "南校区（默认）/北校区/西安"},
-                "days": {"type": "integer", "description": "预报天数 1-7，默认 3"},
+            cache_ttl=0.0,  # 校车查询依赖当前时间，不缓存
+            effect=ToolEffect.READ,
+        )
+    )
+    _tool_manager.register(
+        Tool(
+            name="get_weather",
+            description="查询天气（Open-Meteo 免费数据源）。place: 南校区/北校区/西安，默认南校区；days: 预报天数 1-7，默认 3",
+            handler=weather_handler,
+            schema={
+                "type": "object",
+                "properties": {
+                    "place": {"type": "string", "description": "南校区（默认）/北校区/西安"},
+                    "days": {"type": "integer", "description": "预报天数 1-7，默认 3"},
+                },
             },
-        },
-        cache_ttl=300.0,
-        timeout_s=15.0,
-        effect=ToolEffect.READ,
-    ))
+            cache_ttl=300.0,
+            timeout_s=15.0,
+            effect=ToolEffect.READ,
+        )
+    )
 
     # Agentic RAG：把工具管理器注入执行实例，让 Agent 自主决定何时检索知识库
     _orchestrator.set_tool_manager(_tool_manager)
@@ -510,7 +596,9 @@ def _build_runtime() -> None:
         judge_api_key=os.getenv("EVAL_JUDGE_API_KEY") or cfg["api_key"],
         judge_base_url=os.getenv("EVAL_JUDGE_BASE_URL") or cfg.get("base_url"),
         judge_model=os.getenv("EVAL_JUDGE_MODEL") or cfg["model"],
-        baseline_path=os.getenv("EVAL_BASELINE_PATH", "/app/data/eval/baseline.json"),
+        baseline_path=os.getenv(
+            "EVAL_BASELINE_PATH", "data/eval/baseline.json"
+        ),  # 相对路径：本地与容器（WORKDIR=/app）均可解析
         knowledge_base=_kb,
     )
 

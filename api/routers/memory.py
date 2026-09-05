@@ -1,4 +1,5 @@
 """个人数据中心路由：课表导入/查询、待办 CRUD、当日汇总。"""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/personal", tags=["个人数据"])
 
 class ScheduleImportBody(BaseModel):
     """课表导入请求体：courses（JSON 课表）与 ics_text（ICS 文本）二选一。"""
+
     user_id: str = Field(default="anonymous", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     courses: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=200)
     ics_text: Optional[str] = Field(default=None, max_length=500_000)
@@ -42,9 +44,7 @@ async def import_schedule(body: ScheduleImportBody, user=Depends(require_user)):
         from personal.time_context import SEMESTER_START, SEMESTER_WEEKS
 
         courses = parse_ics(body.ics_text, SEMESTER_START, SEMESTER_WEEKS)
-        count = await personal.import_courses(
-            user.id, [c.to_dict() for c in courses]
-        )
+        count = await personal.import_courses(user.id, [c.to_dict() for c in courses])
     else:
         raise HTTPException(400, "请提供 courses（JSON 课表）或 ics_text（ICS 文本）")
     return {"message": f"课表导入成功，共 {count} 门课程", "courses": count}
@@ -78,7 +78,9 @@ async def import_schedule_file(
         if isinstance(docs, dict):
             docs = docs.get("courses", [])
         if not isinstance(docs, list):
-            raise HTTPException(400, "JSON 课表应为数组: [{course, day_of_week, start_time, end_time, location, weeks}]")
+            raise HTTPException(
+                400, "JSON 课表应为数组: [{course, day_of_week, start_time, end_time, location, weeks}]"
+            )
         count = await personal.import_courses(user.id, docs)
     elif filename.endswith(".ics"):
         courses = parse_ics(text, SEMESTER_START, SEMESTER_WEEKS)
@@ -86,6 +88,34 @@ async def import_schedule_file(
     else:
         raise HTTPException(400, "仅支持 .ics 或 .json 文件")
     return {"message": f"文件 {file.filename} 导入成功，共 {count} 门课程", "courses": count}
+
+
+class ScheduleTextBody(BaseModel):
+    """粘贴文本导入课表：教务系统网页整段复制即可。"""
+
+    text: str = Field(min_length=1, max_length=20_000)
+
+
+@router.post("/schedule/import/text")
+async def import_schedule_text(body: ScheduleTextBody, user=Depends(require_user)):
+    """LLM 解析粘贴的课表文本并整表导入；每行过校验，不合法行跳过。
+
+    LLM 不可用或解析不出课程时回退规则解析；两者都失败返回 400。
+    """
+    parser = state._schedule_parser
+    if parser is None:
+        raise HTTPException(503, "课表解析服务未初始化")
+    parsed = await parser.parse(body.text)
+    courses = parsed.get("courses", [])
+    if not courses:
+        raise HTTPException(400, parsed.get("message") or "未能从文本中解析出任何课程，请检查内容后重试")
+    count = await _require_personal_service().import_courses(user.id, courses)
+    return {
+        "message": f"已导入 {count} 门课程" + (f"，跳过 {parsed['skipped']} 行无法识别的内容" if parsed.get("skipped") else ""),
+        "courses": count,
+        "skipped": parsed.get("skipped", 0),
+        "parser": parsed.get("parser", "llm"),
+    }
 
 
 @router.get("/schedule")
@@ -129,7 +159,8 @@ async def add_todo(body: TodoBody, user=Depends(require_user)):
     if not body.content.strip():
         raise HTTPException(400, "content 不能为空")
     todo = await personal.add_todo(
-        user.id, body.content.strip(),
+        user.id,
+        body.content.strip(),
         kind=body.kind,  # Literal["todo","ddl","exam"] 已校验，无需再判
         due_at=body.due_at,
     )

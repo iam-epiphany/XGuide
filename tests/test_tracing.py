@@ -1,4 +1,5 @@
 """轻量 Trace 测试：span 记录、contextvars 隔离、环形缓冲。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,9 @@ def test_trace_records_spans_with_duration():
 
         async def async_op():
             async with span("async_op", agent="academic"):
-                await asyncio.sleep(0.01)
+                # 50ms：远大于 Windows time.monotonic() ~15.6ms 的时钟粒度，
+                # 避免"起止落在同一 tick → duration_ms=0.0"的偶发失败
+                await asyncio.sleep(0.05)
 
         asyncio.run(async_op())
     finally:

@@ -27,7 +27,7 @@
           <small v-if="authUser.role === 'admin'">管理员</small>
           <button class="account-action" @click="doLogout">退出</button>
         </div>
-        <button v-else class="login-button" @click="openAuth('login')">登录</button>
+        <button v-else class="login-button" @click="openAuth()">登录</button>
       </div>
     </header>
 
@@ -36,7 +36,7 @@
       <div v-if="!authUser" class="product-empty">
         <p class="page-kicker">校园个人 Agent</p><h2>把今天过得明白一点。</h2>
         <p>登录后，课表、待办、DDL 和考试会在这里汇成一页。</p>
-        <button @click="openAuth('login')">登录并建立个人日程</button>
+        <button @click="openAuth()">登录并建立个人日程</button>
       </div>
       <template v-else>
         <header class="today-hero">
@@ -45,6 +45,20 @@
         </header>
         <p v-if="todayError" class="page-error">{{ todayError }}</p>
         <div v-if="todayData" class="today-grid">
+          <article class="today-card briefing-card">
+            <div class="card-head"><p class="card-label">AI 今日简报</p><span v-if="todayBriefing?.cached" class="briefing-flag">已缓存</span></div>
+            <p v-if="briefingBusy" class="empty-copy">正在生成今日简报…</p>
+            <p v-else-if="todayBriefing?.text" class="briefing-text">{{ todayBriefing.text }}</p>
+            <p v-else class="empty-copy">简报暂未生成（配置 LLM 后可用）。</p>
+            <template v-if="freeAdvice?.suggestions?.length">
+              <p class="card-label advice-label">空档建议</p>
+              <ul class="simple-list">
+                <li v-for="s in freeAdvice.suggestions" :key="s.todo_id">
+                  <span><b>{{ s.start }}–{{ s.end }}</b> {{ s.content }}<small v-if="s.why">{{ s.why }}</small></span>
+                </li>
+              </ul>
+            </template>
+          </article>
           <article class="next-course-card">
             <p class="card-label">下一节课</p>
             <template v-if="todayData.next_course"><h3>{{ todayData.next_course.course }}</h3><p>{{ todayData.next_course.start_time }}–{{ todayData.next_course.end_time }} · {{ todayData.next_course.location || '地点未填写' }}</p></template>
@@ -60,12 +74,18 @@
 
     <!-- ── Inbox：只展示画像判断后值得看的公开通知 ───────────────────────── -->
     <section v-else-if="activeTab === 'inbox'" class="product-page inbox-page">
-      <div v-if="!authUser" class="product-empty"><h2>先登录，再筛选与你有关的校园通知。</h2><button @click="openAuth('login')">登录</button></div>
+      <div v-if="!authUser" class="product-empty"><h2>先登录，再筛选与你有关的校园通知。</h2><button @click="openAuth()">登录</button></div>
       <template v-else>
         <header class="inbox-hero"><div><p class="page-kicker">XGUIDE · PERSONAL ATTENTION CENTER</p><h2>Focus First.<br><em>Act Next.</em></h2><p>校园信息被整理为与你有关的事件、时机与下一步行动。</p></div><div class="inbox-hero-actions"><button class="quiet-action" @click="openProfile">{{ inboxProfileComplete ? '调整我的画像' : '完善我的画像' }}</button><button class="sync-action" @click="syncInbox" :disabled="inboxBusy">{{ inboxBusy ? '正在感知校园…' : '同步校园动态' }}</button></div></header>
         <div class="profile-strip"><div><b>{{ inboxProfileComplete ? '个人筛选已启用' : '公开通知模式' }}</b><span>{{ inboxProfileComplete ? '排序已结合你的身份、关注方向和事务时效。' : '完成画像后，XGuide 才能判断哪些事项真正与你有关。' }} 新推送保留 {{ inboxTtlHours }} 小时。</span></div><button class="text-action" @click="openProfile">{{ inboxProfileComplete ? '编辑' : '去设置' }} →</button></div>
         <p v-if="inboxError" class="page-error">{{ inboxError }}</p>
         <template v-if="inboxEvents.length">
+          <section v-if="inboxNarrative?.text || narrativeBusy" class="narrative-section">
+            <p class="narrative-copy">
+              <span class="narrative-flag">AI 摘要</span>
+              {{ narrativeBusy ? '正在生成收件箱摘要…' : inboxNarrative.text }}
+            </p>
+          </section>
           <section class="focus-section">
             <div class="section-head"><div><p class="section-index">01 / NOW</p><h3>今日关注</h3><p>现在最值得处理的 {{ inboxBriefing.today_focus?.length || 0 }} 件事</p></div><span class="focus-pulse">● LIVE</span></div>
             <div v-if="inboxBriefing.today_focus?.length" class="focus-grid"><article v-for="event in inboxBriefing.today_focus" :key="event.id" class="focus-card"><div class="focus-top"><span class="category-chip">需要处理</span><strong>{{ event.attention_score }}</strong></div><h4>{{ event.title }}</h4><p class="deadline-copy" v-if="event.deadline">截止 {{ event.deadline }}</p><p class="reason-copy">{{ event.reason }}</p><ul class="reason-list"><li v-for="(score, label) in event.attention_factors" :key="label" v-if="score">{{ label }} {{ score }}</li></ul><div class="event-actions"><a :href="event.source_url" target="_blank" rel="noreferrer">官方原文 ↗</a><button @click="planFromInbox(event)">生成行动清单</button></div></article></div>
@@ -153,299 +173,36 @@
           placeholder="输入问题，例如：这学期选课什么时候开始？"
           @keydown.enter.exact.prevent="sendMessage"
         ></textarea>
-        <button :disabled="busy || !draft.trim()">{{ busy ? '思考中…' : '发送' }}</button>
+        <button v-if="!busy" type="submit" :disabled="!draft.trim()">发送</button>
+        <button v-else type="button" @click="stopChat">停止</button>
       </form>
       <p class="composer-hint">内容基于校园公开信息整理，具体事项请以学校官方通知为准</p>
     </footer>
 
-    <!-- ── 知识库弹窗（开发者工具，收在角落） ───────────────────────────────── -->
-    <div v-if="showKb" class="modal-mask" @click.self="closeKb">
-      <div class="modal">
-        <div class="modal-head">
-          <h2>知识库</h2>
-          <button class="modal-close" @click="closeKb">✕</button>
-        </div>
+    <KnowledgeModal :open="showKb" :api-settings="settings" @close="closeKb" />
 
-        <section class="kb-section">
-          <div class="panel-heading">
-            <h3>检索</h3>
-            <span class="pill soft">{{ knowledgeCount }} 个片段</span>
-          </div>
-          <div class="inline-form">
-            <input v-model="searchQuery" placeholder="输入关键词，如：校车、选课" @keydown.enter.prevent="searchKnowledge" />
-            <button @click="searchKnowledge" :disabled="busyData || !searchQuery.trim()">检索</button>
-          </div>
-          <div class="result-list">
-            <article v-for="item in searchResults" :key="item.id || item.title" class="result-item">
-              <strong>{{ item.title || '未命名结果' }}</strong>
-              <span>相关度 {{ item.score ?? '-' }}</span>
-              <p>{{ item.content }}</p>
-            </article>
-            <p v-if="searched && searchResults.length === 0" class="no-result">没有检索到相关内容</p>
-          </div>
-        </section>
+    <ScheduleModal :open="showSchedule" :api-settings="settings" @close="closeSchedule" />
 
-        <section class="kb-section">
-          <div class="panel-heading">
-            <h3>导入知识</h3>
-          </div>
-          <label>
-            <span>标题</span>
-            <input v-model="docTitle" placeholder="如：校车时刻说明" />
-          </label>
-          <label>
-            <span>内容</span>
-            <textarea v-model="docContent" rows="4" placeholder="输入知识库内容"></textarea>
-          </label>
-          <div class="actions">
-            <button @click="submitKnowledge" :disabled="busyData || !docTitle.trim() || !docContent.trim()">添加文档</button>
-            <label class="file-button">
-              上传文件
-              <input type="file" accept=".txt,.md,.json" @change="handleUpload" />
-            </label>
-          </div>
-        </section>
+    <TodosModal :open="showTodos" :api-settings="settings" @close="closeTodos" />
 
-        <p v-if="statusText" class="kb-status">{{ statusText }}</p>
-      </div>
-    </div>
+    <ProfileModal :open="showProfile" :api-settings="settings" @close="showProfile = false" @saved="onProfileSaved" />
 
-    <!-- ── 我的课表弹窗 ─────────────────────────────────────────────────────── -->
-    <div v-if="showSchedule" class="modal-mask" @click.self="closeSchedule">
-      <div class="modal modal-wide">
-        <div class="modal-head">
-          <h2>我的课表</h2>
-          <button class="modal-close" @click="closeSchedule">✕</button>
-        </div>
+    <ObsModal :open="showObs" :api-settings="settings" @close="closeObs" />
 
-        <section class="kb-section">
-          <div class="panel-heading">
-            <h3>导入课表</h3>
-            <span class="pill soft">{{ authUser?.username }}</span>
-          </div>
-          <p class="schedule-tip">
-            教务系统导出 <code>.ics</code> 日历文件（选课 → 导出课表）或 <code>.json</code> 课表上传，
-            导入后即可问「今天有什么课？」
-          </p>
-          <div class="actions">
-            <label class="file-button">
-              上传 .ics / .json
-              <input type="file" accept=".ics,.json" @change="handleScheduleUpload" />
-            </label>
-            <button class="danger-button" v-if="scheduleCourses.length" @click="doClearSchedule" :disabled="busyData">清空课表</button>
-          </div>
-          <p v-if="scheduleMsg" class="kb-status">{{ scheduleMsg }}</p>
-        </section>
-
-        <section class="kb-section" v-if="scheduleCourses.length">
-          <div class="panel-heading">
-            <div><h3>课表总览</h3><p class="schedule-caption">{{ scheduleInSemester ? '第 ' + scheduleWeekNum + ' 周进行中；完整课表按课程周次标注。' : '当前不在教学周；仍保留并展示已导入的完整课表。' }}</p></div>
-            <span class="pill soft">{{ scheduleCourses.length }} 节课</span>
-          </div>
-          <div class="timetable-shell" aria-label="每周课表">
-            <div class="timetable">
-              <div class="timetable-head"><span>时间</span><span v-for="day in scheduleDays" :key="day">{{ day }}</span></div>
-              <div class="timetable-body">
-                <div class="timetable-times"><span v-for="time in timetableHours" :key="time">{{ time }}</span></div>
-                <div v-for="day in scheduleDays" :key="day" class="timetable-day">
-                  <article v-for="c in scheduleByDay[day]" :key="c.id || c.course + c.day_of_week + c.start_time" class="course-block" :style="courseBlockStyle(c)">
-                    <b>{{ c.course }}</b><span>{{ c.start_time }}–{{ c.end_time }}</span><small>{{ c.location || '地点未填' }}</small><em>{{ weeksLabel(c.weeks) }}</em>
-                  </article>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <p v-if="!scheduleCourses.length && scheduleLoaded" class="kb-status">
-          还没有课程。上传教务系统导出的 .ics 文件即可导入课表。
-        </p>
-      </div>
-    </div>
-
-    <!-- ── 待办弹窗 ─────────────────────────────────────────────────────────── -->
-    <div v-if="showTodos" class="modal-mask" @click.self="closeTodos">
-      <div class="modal">
-        <div class="modal-head">
-          <h2>待办 / DDL / 考试</h2>
-          <button class="modal-close" @click="closeTodos">✕</button>
-        </div>
-
-        <section class="kb-section">
-          <div class="panel-heading"><h3>新增</h3></div>
-          <div class="todo-form">
-            <input v-model="newTodoContent" placeholder="事项内容，如：交实验报告" @keydown.enter.prevent="doAddTodo" />
-            <select v-model="newTodoKind">
-              <option value="todo">待办</option>
-              <option value="ddl">截止任务</option>
-              <option value="exam">考试</option>
-            </select>
-            <input v-model="newTodoDue" type="date" title="截止日期（可选）" />
-            <button @click="doAddTodo" :disabled="busyData || !newTodoContent.trim()">添加</button>
-          </div>
-          <p v-if="todoMsg" class="kb-status">{{ todoMsg }}</p>
-        </section>
-
-        <section class="kb-section">
-          <div class="panel-heading">
-            <h3>列表</h3>
-            <span class="pill soft">{{ todos.length }} 条</span>
-          </div>
-          <div class="result-list">
-            <article v-for="t in todos" :key="t.id" :class="['todo-item', { done: t.done }]">
-              <div class="todo-main">
-                <strong>{{ t.content }}</strong>
-                <span class="pill">{{ kindLabel(t.kind) }}</span>
-                <small v-if="t.due_at">截止 {{ t.due_at }}</small>
-                <a v-if="t.source_url" class="todo-source" :href="t.source_url" target="_blank" rel="noreferrer">查看来源通知</a>
-              </div>
-              <div class="todo-actions">
-                <button class="mini" @click="doCompleteTodo(t)">{{ t.done ? '恢复' : '完成' }}</button>
-                <button class="mini danger-button" @click="doDeleteTodo(t)">删除</button>
-              </div>
-            </article>
-            <p v-if="todos.length === 0" class="no-result">暂无待办，从聊天里说「帮我记个待办」也可以添加</p>
-          </div>
-        </section>
-      </div>
-    </div>
-
-    <!-- ── 学生画像：Inbox 的确定性筛选条件 ─────────────────────────────── -->
-    <div v-if="showProfile" class="modal-mask" @click.self="showProfile = false">
-      <div class="modal profile-modal">
-        <div class="modal-head"><h2>我的通知筛选条件</h2><button class="modal-close" @click="showProfile = false">✕</button></div>
-        <p class="schedule-tip">这些信息只用于在本地筛选公开通知，不会发送给校园网站。</p>
-        <div class="profile-form">
-          <label><span>学院</span><input v-model.trim="studentProfile.college" placeholder="如：计算机科学与技术学院" /></label>
-          <label><span>专业</span><input v-model.trim="studentProfile.major" placeholder="如：软件工程" /></label>
-          <label><span>年级 / 届别</span><input v-model.trim="studentProfile.grade" placeholder="如：2027届" /></label>
-          <label><span>学历层次</span><select v-model="studentProfile.education"><option value="">暂不填写</option><option value="本科生">本科生</option><option value="研究生">研究生</option></select></label>
-          <fieldset><legend>关注方向</legend><label v-for="interest in profileInterests" :key="interest" class="interest-option"><input v-model="studentProfile.interests" type="checkbox" :value="interest" />{{ interest }}</label></fieldset>
-          <p v-if="profileMsg" class="kb-status">{{ profileMsg }}</p><button @click="saveProfile" :disabled="busyData">保存筛选条件</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── 可观测性：Agent 统计 + 告警 + Trace 瀑布 ─────────────────────────── -->
-    <div v-if="showObs" class="modal-mask" @click.self="closeObs">
-      <div class="modal obs-modal">
-        <div class="modal-head">
-          <h2>可观测性</h2>
-          <button class="modal-close" @click="closeObs">✕</button>
-        </div>
-        <p v-if="obsError" class="obs-error">{{ obsError }}</p>
-
-        <section class="kb-section">
-          <div class="panel-heading">
-            <h3>Agent 实时统计</h3>
-            <button class="kb-button mini" @click="loadObs" :disabled="obsBusy">{{ obsBusy ? '加载中…' : '刷新' }}</button>
-          </div>
-          <table v-if="obsAgents.length" class="obs-table">
-            <thead>
-              <tr><th>Profile</th><th>请求</th><th>成功率</th><th>均延迟</th><th>P50</th><th>P95</th><th>在途</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="a in obsAgents" :key="a.key">
-                <td>{{ a.key }}</td>
-                <td>{{ a.total }}</td>
-                <td :class="a.total && a.success_rate < 0.9 ? 'bad' : ''">{{ (a.success_rate * 100).toFixed(0) }}%</td>
-                <td :class="a.avg_ms > 3000 ? 'bad' : ''">{{ Math.round(a.avg_ms) }} ms</td>
-                <td>{{ a.p50_ms ?? '-' }} ms</td>
-                <td :class="a.p95_ms > 8000 ? 'bad' : ''">{{ a.p95_ms ?? '-' }} ms</td>
-                <td>{{ a.in_flight }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-else class="no-result">暂无请求记录 —— 先发几条消息再回来刷新</p>
-
-          <template v-if="obsAlerts.length">
-            <h4 class="obs-sub">活跃告警</h4>
-            <ul class="obs-list">
-              <li v-for="(a, i) in obsAlerts" :key="i" class="obs-alert">
-                ⚠ [{{ a.severity }}] {{ a.metric }} = {{ a.value }}（阈值 {{ a.threshold }}）{{ a.message }}
-              </li>
-            </ul>
-          </template>
-          <template v-if="obsSuggestions.length">
-            <h4 class="obs-sub">优化建议</h4>
-            <ul class="obs-list">
-              <li v-for="(s, i) in obsSuggestions" :key="i">💡 {{ s.title }}</li>
-            </ul>
-          </template>
-        </section>
-
-        <section class="kb-section">
-          <div class="panel-heading">
-            <h3>最近 Trace（{{ obsTraces.length }} 条，保留 1 小时）</h3>
-          </div>
-          <ul class="obs-list traces">
-            <li v-for="t in obsTraces" :key="t.trace_id">
-              <button class="trace-row" @click="toggleTrace(t.trace_id)">
-                <span class="trace-id">{{ t.trace_id }}</span>
-                <span>{{ t.name }}</span>
-                <span>{{ Math.round(t.duration_ms) }} ms</span>
-                <span>{{ (t.spans || []).length }} spans</span>
-                <span>{{ fmtTime(t.ts) }}</span>
-              </button>
-              <div v-if="expandedTrace === t.trace_id" class="trace-detail">
-                <p v-if="traceDetail" class="muted">tags: {{ JSON.stringify(traceDetail.tags || {}) }}</p>
-                <table class="obs-table">
-                  <thead><tr><th>span</th><th>耗时</th><th>meta</th></tr></thead>
-                  <tbody>
-                    <tr v-for="(s, i) in (traceDetail?.spans || [])" :key="i">
-                      <td>{{ s.name }}</td>
-                      <td>{{ Math.round(s.duration_ms) }} ms</td>
-                      <td class="span-meta">{{ JSON.stringify(s.meta || {}) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p v-if="traceDetail && !traceDetail.spans?.length" class="no-result">该 trace 无 span 记录</p>
-              </div>
-            </li>
-          </ul>
-          <p v-if="obsTraces.length === 0" class="no-result">暂无 trace —— 发一条消息后自动产生</p>
-        </section>
-      </div>
-    </div>
-
-    <!-- ── 校园通行证：轻量登录/注册 ──────────────────────────────────────── -->
-    <div v-if="showAuth" class="auth-mask" @click.self="closeAuth">
-      <section class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-        <div class="auth-ticket">
-          <span>XD</span>
-          <small>ECHO PASS</small>
-        </div>
-        <div class="auth-content">
-          <button class="auth-close" aria-label="关闭" @click="closeAuth">✕</button>
-          <p class="auth-eyebrow">西电校园助手 · 个人空间</p>
-          <h2 id="auth-title">{{ authMode === 'login' ? '登录校园通行证' : '创建校园通行证' }}</h2>
-          <p class="auth-note">登录后，课表、待办和对话记忆只属于你。</p>
-          <form class="auth-form" @submit.prevent="submitAuth">
-            <label>
-              <span>用户名</span>
-              <input v-model.trim="authForm.username" autocomplete="username" minlength="3" maxlength="32" required autofocus />
-            </label>
-            <label>
-              <span>密码</span>
-              <input v-model="authForm.password" type="password" :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'" minlength="6" maxlength="128" required />
-            </label>
-            <p v-if="authError" class="auth-error" role="alert">{{ authError }}</p>
-            <button class="auth-submit" :disabled="authBusy">
-              {{ authBusy ? '处理中…' : authMode === 'login' ? '登录' : '注册并登录' }}
-            </button>
-          </form>
-          <button class="auth-switch" @click="toggleAuthMode">
-            {{ authMode === 'login' ? '还没有账号？立即注册' : '已有账号？返回登录' }}
-          </button>
-        </div>
-      </section>
-    </div>
+    <AuthCard :open="showAuth" :api-settings="settings" @close="closeAuth" @authenticated="onAuthenticated" />
   </main>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import AuthCard from './components/AuthCard.vue'
+import KnowledgeModal from './components/KnowledgeModal.vue'
+import ScheduleModal from './components/ScheduleModal.vue'
+import TodosModal from './components/TodosModal.vue'
+import ProfileModal from './components/ProfileModal.vue'
+import ObsModal from './components/ObsModal.vue'
 import { renderMarkdown } from './lib/markdown'
+import { ApiError, setUnauthorizedHandler } from './lib/backends'
 import {
   addKnowledge,
   addTodo,
@@ -455,17 +212,18 @@ import {
   createInitialSettings,
   deleteTodo,
   deleteInbox,
-  getInbox,
+  getFreeTimeAdvice,
   getInboxBriefing,
+  getInboxNarrative,
   getStudentProfile,
   getToday,
+  getTodayBriefing,
   getSchedule,
   getTodos,
   getCurrentUser,
   importScheduleFile,
-  loginUser,
+  importScheduleText,
   logoutUser,
-  registerUser,
   requestChatStream,
   requestKnowledgeStats,
   requestMonitorSummary,
@@ -476,8 +234,7 @@ import {
   saveStudentProfile,
   saveSettings,
   setInboxStatus,
-  addInboxToPlan,
-  uploadKnowledge
+  addInboxToPlan
 } from './lib/backends'
 
 const settings = reactive(createInitialSettings())
@@ -485,57 +242,33 @@ const activeTab = ref('today')
 const messages = ref([])
 const draft = ref('')
 const busy = ref(false)        // 对话请求进行中（发送按钮/typing 指示器）
+const chatController = ref(null)  // 当前流式请求的 AbortController（支持停止生成）
 const busyData = ref(false)    // 数据操作进行中（知识库/课表/待办），与对话互不阻塞
-const statusText = ref('')
-const knowledgeCount = ref('-')
-const searchQuery = ref('校车')
-const searchResults = ref([])
-const searched = ref(false)
-const docTitle = ref('校车时刻说明')
-const docContent = ref('校园穿梭车连接南校区与北校区，工作日班次较多，周末和节假日班次减少，具体时刻以校车管理最新通知为准。')
 const showKb = ref(false)
 const messageList = ref(null)
 const streamingMessage = ref(null)
 const debugMode = new URLSearchParams(window.location.search).get('debug') === '1'
 const authUser = ref(null)
 const showAuth = ref(false)
-const authMode = ref('login')
-const authBusy = ref(false)
-const authError = ref('')
-const authForm = reactive({ username: '', password: '' })
 
 // 可观测性：Agent 统计 / 告警 / Trace
 const showObs = ref(false)
-const obsBusy = ref(false)
-const obsError = ref('')
-const obsAgents = ref([])
-const obsAlerts = ref([])
-const obsSuggestions = ref([])
-const obsTraces = ref([])
-const expandedTrace = ref(null)
-const traceDetail = ref(null)
 
 // 个人数据中心：课表
 const showSchedule = ref(false)
-const scheduleMsg = ref('')
-const scheduleCourses = ref([])
-const scheduleWeekNum = ref('-')
-const scheduleInSemester = ref(true)
-const scheduleLoaded = ref(false)
 
 // 个人数据中心：待办 / DDL / 考试
 const showTodos = ref(false)
-const todos = ref([])
-const todoMsg = ref('')
-const newTodoContent = ref('')
-const newTodoKind = ref('todo')
-const newTodoDue = ref('')
 
 // P0 Today
 const todayData = ref(null)
 const todayBusy = ref(false)
 const todayError = ref('')
 const todayDateLabel = ref('TODAY')
+// LLM 简报：Today 晨报 + 空档建议（与主数据并行加载，失败静默降级）
+const todayBriefing = ref(null)
+const freeAdvice = ref(null)
+const briefingBusy = ref(false)
 
 // P1 Inbox 与稳定学生画像
 const inboxEvents = ref([])
@@ -544,16 +277,13 @@ const inboxBusy = ref(false)
 const inboxError = ref('')
 const inboxProfileComplete = ref(false)
 const inboxTtlHours = ref(48)
+const inboxNarrative = ref(null)
+const narrativeBusy = ref(false)
 const selectedInboxIds = ref([])
-const inboxSelectionMode = ref(false)
 const selectedCategory = ref('')
 const showArchive = ref(false)
 const showProfile = ref(false)
-const profileMsg = ref('')
-const profileInterests = ['保研', '奖学金', '竞赛', '就业', '考研', '出国']
-const studentProfile = reactive({ college: '', major: '', grade: '', education: '', interests: [] })
 const inboxNewCount = computed(() => inboxEvents.value.filter((event) => event.status === 'new').length)
-const allInboxSelected = computed(() => inboxEvents.value.length > 0 && inboxEvents.value.every((event) => selectedInboxIds.value.includes(event.id)))
 const selectedCategoryEvents = computed(() => inboxBriefing.categories.find((group) => group.key === selectedCategory.value)?.events || [])
 const todayIntro = computed(() => {
   if (!todayData.value) return '正在整理你的课表、事项和提醒。'
@@ -581,40 +311,6 @@ const topics = [
   { icon: '🖥️', title: '教务系统', desc: '登录不上怎么办？', question: '教务系统登录不上怎么办？' },
 ]
 
-const currentBackend = backendMeta(settings)
-
-// 课表按星期分组。完整数据由后端返回，即使当前并非教学周也不会显示为空。
-const scheduleDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-const timetableHours = Array.from({ length: 14 }, (_, index) => `${String(index + 8).padStart(2, '0')}:00`)
-const timetablePalette = [
-  ['#e9f3ff', '#327ecb', '#1e5d9c'], ['#eef8ee', '#3f9970', '#266548'],
-  ['#fff3df', '#c58225', '#895310'], ['#f3edff', '#845fc4', '#54368d'],
-  ['#fff0f3', '#c95f79', '#8c3450'], ['#eaf8f7', '#218f8d', '#16615f'],
-]
-
-const scheduleByDay = computed(() => {
-  const groups = Object.fromEntries(scheduleDays.map((d) => [d, []]))
-  for (const c of scheduleCourses.value) {
-    const name = scheduleDays[c.day_of_week] || '周一'
-    if (groups[name]) groups[name].push(c)
-  }
-  return groups
-})
-
-function courseBlockStyle(course) {
-  const toMinutes = (value) => { const [hour, minute] = String(value || '08:00').split(':').map(Number); return hour * 60 + minute }
-  const start = toMinutes(course.start_time)
-  const end = toMinutes(course.end_time)
-  const top = Math.max(0, (start - 8 * 60) / 60 * 58)
-  const height = Math.max(42, (end - start) / 60 * 58 - 5)
-  const hash = [...String(course.course || '')].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
-  const [background, accent, ink] = timetablePalette[hash % timetablePalette.length]
-  return { top: `${top}px`, height: `${height}px`, '--course-bg': background, '--course-accent': accent, '--course-ink': ink }
-}
-
-function weeksLabel(weeks) {
-  return weeks ? `第 ${weeks} 周` : '全周'
-}
 
 watch(
   () => settings.conversationId,
@@ -622,8 +318,13 @@ watch(
 )
 
 onMounted(async () => {
+  // 会话过期（任何接口返回 401）→ 统一清登录态并弹登录卡
+  setUnauthorizedHandler(() => {
+    authUser.value = null
+    settings.userId = 'anonymous'
+    openAuth()
+  })
   await restoreSession()
-  loadStats()
   if (authUser.value) loadToday()
 })
 
@@ -638,42 +339,23 @@ async function restoreSession() {
   }
 }
 
-function openAuth(mode = 'login') {
-  authMode.value = mode
-  authError.value = ''
-  authForm.password = ''
+function openAuth() {
   showAuth.value = true
 }
 
 function closeAuth() {
   showAuth.value = false
-  authError.value = ''
 }
 
-function toggleAuthMode() {
-  authMode.value = authMode.value === 'login' ? 'register' : 'login'
-  authError.value = ''
-}
-
-async function submitAuth() {
-  authBusy.value = true
-  authError.value = ''
-  try {
-    const action = authMode.value === 'login' ? loginUser : registerUser
-    const data = await action(settings, authForm.username, authForm.password)
-    authUser.value = data.user
-    settings.userId = data.user.id
-    settings.conversationId = ''
-    messages.value = []  // 登录后清空匿名会话消息，避免残留挂在新会话下
-    authForm.password = ''
-    closeAuth()
-    persist()
-    await loadToday()
-  } catch (error) {
-    authError.value = readableError(error)
-  } finally {
-    authBusy.value = false
-  }
+// AuthCard 提交成功回调：会话状态迁移留在父级（组件只管表单与请求）
+async function onAuthenticated(user) {
+  authUser.value = user
+  settings.userId = user.id
+  settings.conversationId = ''
+  messages.value = []  // 登录后清空匿名会话消息，避免残留挂在新会话下
+  showAuth.value = false
+  persist()
+  await loadToday()
 }
 
 async function doLogout() {
@@ -691,6 +373,10 @@ async function doLogout() {
 }
 
 function readableError(error) {
+  // ApiError：detail 已是后端给的可读文案
+  if (error instanceof ApiError && typeof error.detail === 'string' && error.detail.trim()) {
+    return error.detail
+  }
   const raw = String(error?.message || error)
   try {
     const jsonStart = raw.indexOf('{')
@@ -725,6 +411,22 @@ async function loadToday() {
   } finally {
     todayBusy.value = false
   }
+  loadTodayBriefing()
+}
+
+// AI 简报与空档建议：主数据加载完成后异步拉取，不阻塞课表/待办渲染
+async function loadTodayBriefing() {
+  briefingBusy.value = true
+  try {
+    const [briefing, advice] = await Promise.allSettled([getTodayBriefing(settings), getFreeTimeAdvice(settings)])
+    todayBriefing.value = briefing.status === 'fulfilled' && briefing.value.available ? briefing.value : null
+    freeAdvice.value = advice.status === 'fulfilled' && advice.value.available ? advice.value : null
+  } catch {
+    todayBriefing.value = null
+    freeAdvice.value = null
+  } finally {
+    briefingBusy.value = false
+  }
 }
 
 async function finishTodayTodo(todo) {
@@ -757,6 +459,21 @@ async function loadInbox() {
     inboxError.value = readableError(error)
   } finally {
     inboxBusy.value = false
+  }
+  // LLM 摘要与主列表并行：只在有内容时展示，失败静默
+  if (inboxEvents.value.length) {
+    narrativeBusy.value = true
+    inboxNarrative.value = null
+    try {
+      const data = await getInboxNarrative(settings)
+      inboxNarrative.value = data.available ? data : null
+    } catch {
+      inboxNarrative.value = null
+    } finally {
+      narrativeBusy.value = false
+    }
+  } else {
+    inboxNarrative.value = null
   }
 }
 
@@ -793,80 +510,15 @@ async function planFromInbox(event) {
   }
 }
 
-function toggleInboxSelection(id, checked) {
-  selectedInboxIds.value = checked
-    ? [...new Set([...selectedInboxIds.value, id])]
-    : selectedInboxIds.value.filter((value) => value !== id)
+function openProfile() {
+  if (!authUser.value) return openAuth()
+  showProfile.value = true
 }
 
-function startInboxSelection() {
-  inboxSelectionMode.value = true
-}
-
-function cancelInboxSelection() {
-  inboxSelectionMode.value = false
-  selectedInboxIds.value = []
-}
-
-function toggleAllInbox(checked) {
-  selectedInboxIds.value = checked ? inboxEvents.value.map((event) => event.id) : []
-}
-
-async function deleteSelectedInbox() {
-  if (!selectedInboxIds.value.length) return
-  inboxBusy.value = true
-  inboxError.value = ''
-  try {
-    await deleteInbox(settings, selectedInboxIds.value)
-    cancelInboxSelection()
-    await loadInbox()
-  } catch (error) {
-    inboxError.value = readableError(error)
-  } finally {
-    inboxBusy.value = false
-  }
-}
-
-async function clearInbox() {
-  if (!window.confirm('确定清空当前 Inbox 中的全部通知吗？公共赛事与通知源不会被删除。')) return
-  inboxBusy.value = true
-  inboxError.value = ''
-  try {
-    await deleteInbox(settings)
-    cancelInboxSelection()
-    await loadInbox()
-  } catch (error) {
-    inboxError.value = readableError(error)
-  } finally {
-    inboxBusy.value = false
-  }
-}
-
-async function openProfile() {
-  if (!authUser.value) return openAuth('login')
-  profileMsg.value = ''
-  try {
-    const profile = await getStudentProfile(settings)
-    Object.assign(studentProfile, { college: '', major: '', grade: '', education: '', interests: [], ...profile })
-    showProfile.value = true
-  } catch (error) {
-    inboxError.value = readableError(error)
-  }
-}
-
-async function saveProfile() {
-  busyData.value = true
-  profileMsg.value = ''
-  try {
-    await saveStudentProfile(settings, studentProfile)
-    profileMsg.value = '已保存，接下来会按这些条件筛选公开通知。'
-    inboxProfileComplete.value = Boolean(studentProfile.education || studentProfile.interests.length)
-    await loadInbox()
-  } catch (error) {
-    profileMsg.value = readableError(error)
-  } finally {
-    busyData.value = false
-  }
+// ProfileModal 保存回调：刷新 Inbox 的筛选开关与内容
+async function onProfileSaved(complete) {
+  inboxProfileComplete.value = complete
+  await loadInbox()
 }
 
 // ── Markdown 渲染缓存（流式 delta 每帧全量重渲，用 memo 避免重复计算）────────
@@ -899,6 +551,10 @@ function askTopic(question) {
   sendMessage()
 }
 
+function stopChat() {
+  chatController.value?.abort()
+}
+
 async function sendMessage() {
   const content = draft.value.trim()
   if (!content) return
@@ -909,6 +565,9 @@ async function sendMessage() {
   }
   draft.value = ''
   busy.value = true
+  // 新发送中止上一轮仍在进行的流（旧流结果会被新一轮覆盖，继续拉流纯属浪费）
+  if (chatController.value) chatController.value.abort()
+  chatController.value = new AbortController()
 
   // 流式消息占位（SSE 逐 token 渲染）
   const assistantMsg = {
@@ -925,6 +584,7 @@ async function sendMessage() {
 
   try {
     const done = await requestChatStream(settings, content, {
+      signal: chatController.value.signal,
       onEvent: (ev) => {
         if (ev.type === 'delta') {
           assistantMsg.content += ev.text
@@ -953,262 +613,68 @@ async function sendMessage() {
       done.knowledge_used ? 'RAG' : ''
     ].filter(Boolean).join(' · ')
   } catch (error) {
-    assistantMsg.content = error.message
-    assistantMsg.meta = '请求失败'
+    if (error?.name === 'AbortError') {
+      assistantMsg.content = assistantMsg.content || '（已停止生成）'
+      assistantMsg.meta = '已停止'
+    } else {
+      assistantMsg.content = readableError(error)
+      assistantMsg.meta = '请求失败'
+    }
     assistantMsg.streaming = false
   } finally {
     busy.value = false
+    chatController.value = null
     streamingMessage.value = null
     await nextTick()
     messageList.value?.scrollTo({ top: messageList.value.scrollHeight, behavior: 'smooth' })
   }
 }
 
-// ── 知识库 ──────────────────────────────────────────────────────────────────
+// ── 知识库（管理员门禁，数据逻辑在 KnowledgeModal）────────────────────────────
 
 function openKb() {
   if (authUser.value?.role !== 'admin') return
   showKb.value = true
-  loadStats()
 }
 
 function closeKb() {
   showKb.value = false
 }
 
-// ── 可观测性：监控 / Trace ────────────────────────────────────────────────────
-
 function openObs() {
   showObs.value = true
-  loadObs()
 }
 
 function closeObs() {
   showObs.value = false
-  expandedTrace.value = null
-  traceDetail.value = null
-}
-
-async function loadObs() {
-  obsBusy.value = true
-  obsError.value = ''
-  try {
-    const [mon, traces] = await Promise.all([
-      requestMonitorSummary(settings),
-      requestTraces(settings, 20)
-    ])
-    obsAgents.value = Object.entries(mon.agent_stats || {}).map(([key, v]) => ({ key, ...v }))
-    obsAlerts.value = mon.active_alerts || []
-    obsSuggestions.value = mon.suggestions || []
-    obsTraces.value = traces.traces || []
-  } catch (err) {
-    obsError.value = String(err?.message || err).slice(0, 300)
-    obsAgents.value = []
-    obsAlerts.value = []
-    obsSuggestions.value = []
-    obsTraces.value = []
-  } finally {
-    obsBusy.value = false
-  }
-}
-
-async function toggleTrace(traceId) {
-  if (expandedTrace.value === traceId) {
-    expandedTrace.value = null
-    traceDetail.value = null
-    return
-  }
-  expandedTrace.value = traceId
-  traceDetail.value = null
-  try {
-    traceDetail.value = await requestTraceDetail(settings, traceId)
-  } catch (err) {
-    obsError.value = String(err?.message || err).slice(0, 300)
-  }
-}
-
-function fmtTime(ts) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false })
-}
-
-async function loadStats() {
-  try {
-    const stats = await requestKnowledgeStats(settings)
-    knowledgeCount.value = stats.total_chunks ?? stats.totalChunks ?? '-'
-  } catch {
-    // 后端不可用时保持现状
-  }
-}
-
-async function searchKnowledge() {
-  busyData.value = true
-  searched.value = true
-  try {
-    const data = await requestSearch(settings, searchQuery.value, 5)
-    searchResults.value = data.results || []
-  } catch (error) {
-    statusText.value = error.message
-  } finally {
-    busyData.value = false
-  }
-}
-
-async function submitKnowledge() {
-  busyData.value = true
-  try {
-    const data = await addKnowledge(settings, [
-      { title: docTitle.value.trim(), content: docContent.value.trim() }
-    ])
-    statusText.value = data.message || JSON.stringify(data)
-    docTitle.value = ''
-    docContent.value = ''
-    await loadStats()
-  } catch (error) {
-    statusText.value = error.message
-  } finally {
-    busyData.value = false
-  }
-}
-
-async function handleUpload(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  busyData.value = true
-  try {
-    const data = await uploadKnowledge(settings, file)
-    statusText.value = data.message || JSON.stringify(data)
-    await loadStats()
-  } catch (error) {
-    statusText.value = error.message
-  } finally {
-    busyData.value = false
-  }
 }
 
 // ── 我的课表 ─────────────────────────────────────────────────────────────────
 
 async function openSchedule() {
   if (!authUser.value) {
-    openAuth('login')
+    openAuth()
     return
   }
   showSchedule.value = true
-  scheduleMsg.value = ''
-  scheduleLoaded.value = false
-  await loadSchedule()
 }
 
 function closeSchedule() {
   showSchedule.value = false
 }
 
-async function loadSchedule() {
-  try {
-    const data = await getSchedule(settings)
-    scheduleCourses.value = data.courses || []
-    scheduleWeekNum.value = data.week_num ?? '-'
-    scheduleInSemester.value = data.in_semester !== false
-    scheduleLoaded.value = true
-  } catch (error) {
-    scheduleMsg.value = error.message
-    scheduleLoaded.value = true
-  }
-}
-
-async function handleScheduleUpload(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  busyData.value = true
-  scheduleMsg.value = '导入中…'
-  try {
-    const data = await importScheduleFile(settings, file)
-    scheduleMsg.value = data.message || JSON.stringify(data)
-    await loadSchedule()
-  } catch (error) {
-    scheduleMsg.value = error.message
-  } finally {
-    busyData.value = false
-  }
-}
-
-async function doClearSchedule() {
-  if (!confirm('确定清空课表吗？清空后需要重新导入。')) return
-  busyData.value = true
-  try {
-    const data = await clearSchedule(settings)
-    scheduleMsg.value = data.message || '已清空'
-    scheduleCourses.value = []
-  } catch (error) {
-    scheduleMsg.value = error.message
-  } finally {
-    busyData.value = false
-  }
-}
-
 // ── 待办 / DDL / 考试 ────────────────────────────────────────────────────────
 
 async function openTodos() {
   if (!authUser.value) {
-    openAuth('login')
+    openAuth()
     return
   }
   showTodos.value = true
-  todoMsg.value = ''
-  await loadTodos()
 }
 
 function closeTodos() {
   showTodos.value = false
 }
 
-async function loadTodos() {
-  try {
-    const data = await getTodos(settings, 'all')
-    todos.value = data.todos || []
-  } catch (error) {
-    todoMsg.value = error.message
-  }
-}
-
-function kindLabel(kind) {
-  return { todo: '待办', ddl: 'DDL', exam: '考试' }[kind] || kind
-}
-
-async function doAddTodo() {
-  const content = newTodoContent.value.trim()
-  if (!content) return
-  busyData.value = true
-  try {
-    await addTodo(settings, content, newTodoKind.value, newTodoDue.value)
-    newTodoContent.value = ''
-    newTodoDue.value = ''
-    todoMsg.value = '已添加'
-    await loadTodos()
-  } catch (error) {
-    todoMsg.value = error.message
-  } finally {
-    busyData.value = false
-  }
-}
-
-async function doCompleteTodo(t) {
-  try {
-    await completeTodo(settings, t.id, !t.done)
-    await loadTodos()
-  } catch (error) {
-    todoMsg.value = error.message
-  }
-}
-
-async function doDeleteTodo(t) {
-  try {
-    await deleteTodo(settings, t.id)
-    await loadTodos()
-  } catch (error) {
-    todoMsg.value = error.message
-  }
-}
 </script>

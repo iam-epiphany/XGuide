@@ -189,6 +189,16 @@ textarea:focus {
 .simple-list em { color: var(--xdu-navy); font-size: 12px; font-style: normal; white-space: nowrap; }.simple-list em.overdue { color: var(--xdu-red); font-weight: 800; }
 .check-button { width: 22px; min-width: 22px; height: 22px; min-height: 22px; padding: 0; border: 1px solid #9aaaba; border-radius: 50%; background: #fff; color: var(--xdu-navy); box-shadow: none; }.check-button:hover { border-color: var(--xdu-red); color: var(--xdu-red); filter: none; }
 .deadline-card { border-top: 3px solid var(--xdu-red); }.reminders-card { grid-column: span 2; background: #fff7f8; border-color: #f3d5db; }.empty-copy { margin: 18px 0 0; color: var(--text-muted); font-size: 14px; }
+
+/* ── AI 简报：晨报文本 + 空档建议（Today）与收件箱摘要（Inbox）────────── */
+.briefing-card { background: linear-gradient(135deg, #fff7f8, #f4f7ff); border-color: #e8d9e2; }
+.briefing-text { margin: 10px 0 0; color: var(--text); font-size: 14.5px; line-height: 1.75; white-space: pre-line; }
+.briefing-flag { color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.advice-label { margin-top: 16px; }
+.briefing-card .simple-list small { color: var(--text-muted); }
+.narrative-section { margin: 0 0 18px; }
+.narrative-copy { margin: 0; padding: 14px 18px; color: var(--text); font-size: 14.5px; line-height: 1.75; background: #fff7f8; border: 1px solid #f3d5db; border-radius: 14px; }
+.narrative-flag { margin-right: 8px; color: var(--xdu-red); font-size: 11px; font-weight: 900; letter-spacing: .1em; }
 .product-empty { display: grid; justify-items: start; gap: 10px; max-width: 620px; margin: 82px auto; text-align: left; }.product-empty.compact { align-items: center; justify-items: center; text-align: center; }.page-error { margin: 0 0 16px; color: #a30d26; }
 
 /* ── Inbox：来源、原因与下一步都在同一阅读线内 ─────────────────────────── */

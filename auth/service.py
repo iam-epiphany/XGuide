@@ -1,4 +1,5 @@
 """SQLite users, password hashing and signed browser sessions."""
+
 from __future__ import annotations
 
 import base64
@@ -16,6 +17,8 @@ import sqlite3
 import threading
 import time
 from typing import Any, Iterator, Optional
+
+from core.sqlite import connect as sqlite_connect
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +60,7 @@ def _verify_password(password: str, encoded: str) -> bool:
         algorithm, iterations, salt_hex, digest_hex = encoded.split("$", 3)
         if algorithm != "pbkdf2_sha256":
             return False
-        actual = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations)
-        )
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
         return hmac.compare_digest(actual.hex(), digest_hex)
     except (TypeError, ValueError):
         return False
@@ -130,9 +131,7 @@ class AuthStore:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return sqlite_connect(self.db_path, timeout=10)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -210,9 +209,7 @@ class AuthStore:
 
     def get_user(self, user_id: str) -> Optional[AuthUser]:
         with self._connection() as conn:
-            row = conn.execute(
-                "SELECT id, username, role, pwd_ver FROM users WHERE id = ?", (user_id,)
-            ).fetchone()
+            row = conn.execute("SELECT id, username, role, pwd_ver FROM users WHERE id = ?", (user_id,)).fetchone()
         return AuthUser(str(row["id"]), row["username"], row["role"], int(row["pwd_ver"])) if row else None
 
     def change_password(self, user_id: str, current_password: str, new_password: str) -> bool:

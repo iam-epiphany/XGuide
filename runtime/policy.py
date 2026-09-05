@@ -7,6 +7,7 @@ ExecutionPolicy —— Agent Runtime 的执行预算与策略。
 所有项可通过 ECHOGUIDE_RUNTIME_* 环境变量或代码注入覆盖。
 frozen：运行期不可变，换策略即换实例。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,19 +39,19 @@ def _float_env(name: str, default: float) -> float:
 class ExecutionPolicy:
     """执行预算与策略（默认值与原魔法数字一一对应）。"""
 
-    max_agents: int = 3                  # 协作目标 Agent 上限（原 targets[:3]）
-    max_tasks: int = 6                   # 协作任务 DAG 上限（原 6）
-    max_tool_rounds_fast: int = 3        # Fast 路径工具轮次上限（保险丝；LLM 无 tool_use 即停）
-    max_tool_rounds_deep: int = 5        # Deep 路径工具轮次上限（复杂任务留给 Deep）
-    stagnant_round_limit: int = 2        # 无进展检测：连续 N 轮工具调用与上一轮完全重复 → 强制收尾
-    max_model_calls: int = 0             # 单请求真实模型调用次数上限（0 = 仅计数不强限）
-    max_tool_calls: int = 0              # 单请求工具调用总次数上限（0 = 仅计数不强限）
-    max_retries: int = 1                 # 失败降级次数上限（Fast→Deep）
-    request_timeout_s: float = 120.0     # 单请求全局 deadline（0 = 不设超时）
-    synth_max_tokens: int = 1024         # 协作合成器输出预算（原硬编码 1024）
-    guard_enabled: bool = True           # Runtime 层 Guard（CLI/内部调用同样受保护）
+    max_agents: int = 3  # 协作目标 Agent 上限（原 targets[:3]）
+    max_tasks: int = 6  # 协作任务 DAG 上限（原 6）
+    max_tool_rounds_fast: int = 3  # Fast 路径工具轮次上限（保险丝；LLM 无 tool_use 即停）
+    max_tool_rounds_deep: int = 5  # Deep 路径工具轮次上限（复杂任务留给 Deep）
+    stagnant_round_limit: int = 2  # 无进展检测：连续 N 轮工具调用与上一轮完全重复 → 强制收尾
+    max_model_calls: int = 0  # 单请求真实模型调用次数上限（0 = 仅计数不强限）
+    max_tool_calls: int = 0  # 单请求工具调用总次数上限（0 = 仅计数不强限）
+    max_retries: int = 1  # 失败降级次数上限（Fast→Deep）
+    request_timeout_s: float = 120.0  # 单请求全局 deadline（0 = 不设超时）
+    synth_max_tokens: int = 1024  # 协作合成器输出预算（原硬编码 1024）
+    guard_enabled: bool = True  # Runtime 层 Guard（CLI/内部调用同样受保护）
     guard_max_message_chars: int = 2000  # 单条消息长度上限（与 HTTP 层 GuardSettings 对齐）
-    verifier_llm_enabled: bool = False   # 出口校验 LLM 判定（规则校验始终开启；仅 DEEP/执行路径）
+    verifier_llm_enabled: bool = False  # 出口校验 LLM 判定（规则校验始终开启；仅 DEEP/执行路径）
 
     @classmethod
     def from_env(cls) -> ExecutionPolicy:
@@ -67,8 +68,6 @@ class ExecutionPolicy:
             request_timeout_s=_float_env("ECHOGUIDE_RUNTIME_REQUEST_TIMEOUT_S", 120.0),
             synth_max_tokens=_int_env("ECHOGUIDE_RUNTIME_SYNTH_MAX_TOKENS", 1024),
             guard_enabled=_bool_env("ECHOGUIDE_RUNTIME_GUARD_ENABLED", True),
-            guard_max_message_chars=_int_env(
-                "ECHOGUIDE_RUNTIME_GUARD_MAX_MESSAGE_CHARS", 2000
-            ),
+            guard_max_message_chars=_int_env("ECHOGUIDE_RUNTIME_GUARD_MAX_MESSAGE_CHARS", 2000),
             verifier_llm_enabled=_bool_env("ECHOGUIDE_RUNTIME_VERIFIER_LLM", False),
         )

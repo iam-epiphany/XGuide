@@ -4,6 +4,7 @@ query_schedule —— 个人课程表查询工具。
 通过 context["user_id"] 读取该用户的课表（无则提示先导入），
 按日期表达式（今天/明天/周X/YYYY-MM-DD）返回当天课程列表。
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict

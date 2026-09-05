@@ -32,6 +32,7 @@ token 逐次累加；一次模型调用 = 一次 before/after_model。
     )
     raw = result.response.content[0].text
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,13 +51,13 @@ logger = logging.getLogger(__name__)
 class ModelCallResult:
     """一次模型调用的完整结果（含统计）。"""
 
-    response: Any                # 原始 Message（content/stop_reason/usage）
+    response: Any  # 原始 Message（content/stop_reason/usage）
     model: str
     input_tokens: int
     output_tokens: int
     latency_ms: float
-    attempts: int                # 实际尝试次数（含重试；1 = 一次成功）
-    streamed: bool = False       # 是否流式调用
+    attempts: int  # 实际尝试次数（含重试；1 = 一次成功）
+    streamed: bool = False  # 是否流式调用
 
 
 def _usage_tokens(resp: Any) -> tuple[int, int]:
@@ -103,18 +104,20 @@ class ModelGateway:
 
         t0 = time.monotonic()
         attempts = 0
+        # before_model（步骤计数 + 预算检查）只在逻辑调用时触发一次：
+        # 重试是同一逻辑调用的内部细节，每次 attempt 重复计数会让预算虚增
+        if state is not None:
+            ctx = RunContext(
+                state=state,
+                policy=self._policy,
+                services=services or {},
+                on_event=on_event,
+            )
+            await self._chain.before_model(ctx)
         while True:
             attempts += 1
             try:
                 async with span(span_name, model=model, streamed=False):
-                    if state is not None:
-                        ctx = RunContext(
-                            state=state,
-                            policy=self._policy,
-                            services=services or {},
-                            on_event=on_event,
-                        )
-                        await self._chain.before_model(ctx)
                     resp = await client.messages.create(
                         model=model,
                         messages=messages,

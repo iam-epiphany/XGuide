@@ -1,4 +1,5 @@
 """系统与支撑路由：/health、/skills、/campus。"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException

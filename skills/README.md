@@ -1,6 +1,6 @@
-# EchoGuide Skills
+# XGuide Skills
 
-EchoGuide 从 `ECHOGUIDE_SKILLS_DIR` 发现 `skills/<skill-id>/SKILL.md`。目录（id、名称、描述、关键词）常驻提示；模型按需调用唯一只读工具 `load_skill(skill_name)` 获取完整 SOP。加载 Skill 不会授予工具、写入或角色权限。
+XGuide 从兼容环境变量 `ECHOGUIDE_SKILLS_DIR` 发现 `skills/<skill-id>/SKILL.md`。目录（id、名称、描述、关键词）常驻提示；模型按需调用唯一只读工具 `load_skill(skill_name)` 获取完整 SOP。加载 Skill 不会授予工具、写入或角色权限。
 
 内置 12 个任务能力包：
 

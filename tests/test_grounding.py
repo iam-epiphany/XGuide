@@ -11,6 +11,7 @@ Hard Guards（金额/数字/百分比/日期/时间/星期/否定反义/作用�
 Guard 覆盖高 cosine、Claim 级标注、模型 [n] 剥离、无证据不加引用、
 非事实句 skip、批量 Judge、Judge fail-open、Trace 字段。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -90,15 +91,26 @@ def test_split_claims_keeps_quoted_commas():
 
 
 def test_is_factual_claim_skips_non_factual():
-    for s in ("如果需要我可以继续查询", "建议提前确认最新通知",
-              "祝您生活愉快", "以上是查询结果", "我帮你总结一下",
-              "如有疑问请咨询教务处", "具体请以官方通知为准"):
+    for s in (
+        "如果需要我可以继续查询",
+        "建议提前确认最新通知",
+        "祝您生活愉快",
+        "以上是查询结果",
+        "我帮你总结一下",
+        "如有疑问请咨询教务处",
+        "具体请以官方通知为准",
+    ):
         assert g.is_factual_claim(s) is False, s
 
 
 def test_is_factual_claim_keeps_factual():
-    for s in ("补办校园卡需要身份证", "费用为 20 元", "行政楼周日开放",
-              "办理地点在师生服务大厅", "开放时间为周一至周五 9:00-17:00"):
+    for s in (
+        "补办校园卡需要身份证",
+        "费用为 20 元",
+        "行政楼周日开放",
+        "办理地点在师生服务大厅",
+        "开放时间为周一至周五 9:00-17:00",
+    ):
         assert g.is_factual_claim(s) is True, s
 
 
@@ -132,20 +144,17 @@ def test_guard_bare_number():
 
 
 def test_guard_date_interval():
-    assert not g.check_hard_consistency(
-        "图书馆 5 月 2 日闭馆", "图书馆 5 月 1 日至 5 月 3 日闭馆")["conflict"]
-    assert g.check_hard_consistency(
-        "图书馆 5 月 5 日闭馆", "图书馆 5 月 1 日至 5 月 3 日闭馆")["conflict"]
+    assert not g.check_hard_consistency("图书馆 5 月 2 日闭馆", "图书馆 5 月 1 日至 5 月 3 日闭馆")["conflict"]
+    assert g.check_hard_consistency("图书馆 5 月 5 日闭馆", "图书馆 5 月 1 日至 5 月 3 日闭馆")["conflict"]
     # 区间必须相等或严格包含：claim [5-1,5-3] vs evidence [5-1,5-3]
-    assert not g.check_hard_consistency(
-        "图书馆 5 月 1 日至 5 月 3 日闭馆", "图书馆 5 月 1 日至 5 月 3 日闭馆")["conflict"]
+    assert not g.check_hard_consistency("图书馆 5 月 1 日至 5 月 3 日闭馆", "图书馆 5 月 1 日至 5 月 3 日闭馆")[
+        "conflict"
+    ]
 
 
 def test_guard_time():
-    assert not g.check_hard_consistency(
-        "教务处 10:00 可办理业务", "教务处办公时间为 9:00-17:00")["conflict"]
-    assert g.check_hard_consistency(
-        "教务处办公时间为 9:00-18:00", "教务处办公时间为 9:00-17:00")["conflict"]
+    assert not g.check_hard_consistency("教务处 10:00 可办理业务", "教务处办公时间为 9:00-17:00")["conflict"]
+    assert g.check_hard_consistency("教务处办公时间为 9:00-18:00", "教务处办公时间为 9:00-17:00")["conflict"]
     # 12h/24h 归一：下午 3:00 == 15:00
     assert not g.check_hard_consistency("下午 3:00 下班", "15:00 下班")["conflict"]
 
@@ -153,8 +162,7 @@ def test_guard_time():
 def test_guard_weekday():
     assert g.check_hard_consistency("校园卡服务厅周六开放", "校园卡服务厅周日开放")["conflict"]
     assert not g.check_hard_consistency("行政楼周一开放", "行政楼周一至周五开放")["conflict"]
-    assert not g.check_hard_consistency(
-        "行政楼周一至周五开放", "行政楼开放时间为周一至周五")["conflict"]
+    assert not g.check_hard_consistency("行政楼周一至周五开放", "行政楼开放时间为周一至周五")["conflict"]
 
 
 def test_guard_negation():
@@ -165,8 +173,7 @@ def test_guard_negation():
 
 def test_guard_scoped_negation():
     # 周六开放 vs 周六休息（同一作用域反义）→ 硬冲突
-    rec = g.check_hard_consistency(
-        "校园卡服务厅周六开放", "校园卡服务厅周日开放，周六休息")
+    rec = g.check_hard_consistency("校园卡服务厅周六开放", "校园卡服务厅周日开放，周六休息")
     assert rec["conflict"]
     assert rec["level"] == "hard"
     # claim 笼统（未限定星期）vs evidence 带限定的休息 → 软信号（不硬拦截）
@@ -201,8 +208,9 @@ def test_soft_guard_routes_high_confidence_to_judge():
 
 
 def test_guard_no_false_positive_on_consistent_texts():
-    assert not g.check_hard_consistency("补办校园卡需携带本人身份证",
-                                        "补办校园卡需携带本人身份证原件及复印件")["conflict"]
+    assert not g.check_hard_consistency("补办校园卡需携带本人身份证", "补办校园卡需携带本人身份证原件及复印件")[
+        "conflict"
+    ]
 
 
 # ── 全证据候选匹配（P0-1）─────────────────────────────────────────────────────
@@ -212,8 +220,8 @@ def test_candidates_rank_by_combined_not_dice():
     """Dice 最大的 Evidence 不一定是语义最相关的——组合分决定排序。"""
     claim = "补办费用 20 元"
     evs = [
-        _ev("A", "补办费用 20 元押金"),           # dice 高（词面近）
-        _ev("B", "校园卡补办需交费用 20 元"),      # dice 略低但语义更相关
+        _ev("A", "补办费用 20 元押金"),  # dice 高（词面近）
+        _ev("B", "校园卡补办需交费用 20 元"),  # dice 略低但语义更相关
     ]
     angles = {
         claim: 0.0,
@@ -244,8 +252,7 @@ def test_guard_beats_high_cosine_and_picks_second_candidate():
         _ev("旧通知", "校园卡补办费用为 200 元"),  # dice/cos 都更高（诱饵）
         _ev("最新通知", "补办费用为 20 元"),
     ]
-    angles = {claim: 0.0, "校园卡补办费用为 200 元": angle_for_cos(0.95),
-              "补办费用为 20 元": angle_for_cos(0.55)}
+    angles = {claim: 0.0, "校园卡补办费用为 200 元": angle_for_cos(0.95), "补办费用为 20 元": angle_for_cos(0.55)}
     with _embed(angles):
         rec = _run(g.decide_claim(claim, evs))
     assert rec["status"] == "supported"
@@ -341,10 +348,8 @@ def test_annotate_skips_non_factual():
 
 def test_annotate_citation_indices_in_range():
     answer = "补办需身份证。费用为 20 元。"
-    evs = [_ev("指南", "补办校园卡需携带本人身份证。"),
-           _ev("收费", "补办费用为 20 元。")]
-    angles = {"补办需身份证": 0.0, "费用为 20 元": 0.0,
-              "补办校园卡需携带本人身份证。": 0.0, "补办费用为 20 元。": 0.0}
+    evs = [_ev("指南", "补办校园卡需携带本人身份证。"), _ev("收费", "补办费用为 20 元。")]
+    angles = {"补办需身份证": 0.0, "费用为 20 元": 0.0, "补办校园卡需携带本人身份证。": 0.0, "补办费用为 20 元。": 0.0}
     with _embed(angles):
         out = _run(g.annotate_citations(answer, evs))
     assert out["citation_indices"] == [1, 2]
@@ -363,8 +368,7 @@ class _FakeJudge:
 
     async def judge(self, claims, evidences):
         self.calls.append((list(claims), [e.get("content", "") for e in evidences]))
-        return {c: self.results.get(c, {"verdict": "insufficient", "evidence_ids": []})
-                for c in claims}
+        return {c: self.results.get(c, {"verdict": "insufficient", "evidence_ids": []}) for c in claims}
 
 
 def _fuzzy_angles(claims, evs):
@@ -378,12 +382,13 @@ def _fuzzy_angles(claims, evs):
 
 def test_judge_batch_single_call_and_applies_verdicts():
     answer = "支持线上补办。补办无需费用。"
-    evs = [_ev("指南", "补办校园卡需携带本人身份证。"),
-           _ev("线上", "线上办理入口在服务大厅。")]
-    judge = _FakeJudge({
-        "支持线上补办。": {"verdict": "supported", "evidence_ids": [2]},
-        "补办无需费用。": {"verdict": "contradicted", "evidence_ids": []},
-    })
+    evs = [_ev("指南", "补办校园卡需携带本人身份证。"), _ev("线上", "线上办理入口在服务大厅。")]
+    judge = _FakeJudge(
+        {
+            "支持线上补办。": {"verdict": "supported", "evidence_ids": [2]},
+            "补办无需费用。": {"verdict": "contradicted", "evidence_ids": []},
+        }
+    )
     with _embed(_fuzzy_angles(["支持线上补办。", "补办无需费用。"], evs)):
         out = _run(g.annotate_citations(answer, evs, entailment_judge=judge))
     # 两个模糊 Claim 合并为一次 Judge 请求
@@ -400,8 +405,9 @@ def test_judge_evidence_ids_out_of_range_dropped():
     """Judge 返回越界 evidence_ids → 不产生 Citation（索引必须落在真实范围内）。"""
     judge = _FakeJudge({"模糊陈述": {"verdict": "supported", "evidence_ids": [9]}})
     with _embed(_fuzzy_angles(["模糊陈述"], [_ev("A", "补办校园卡需携带本人身份证。")])):
-        out = _run(g.annotate_citations("模糊陈述。", [_ev("A", "补办校园卡需携带本人身份证。")],
-                                        entailment_judge=judge))
+        out = _run(
+            g.annotate_citations("模糊陈述。", [_ev("A", "补办校园卡需携带本人身份证。")], entailment_judge=judge)
+        )
     assert out["citation_indices"] == []
     assert out["claims"][0]["status"] == "insufficient"
 
@@ -412,8 +418,11 @@ def test_judge_fail_open_on_exception():
             raise RuntimeError("模型不可用")
 
     with _embed(_fuzzy_angles(["模糊陈述"], [_ev("A", "补办校园卡需携带本人身份证。")])):
-        out = _run(g.annotate_citations("模糊陈述。", [_ev("A", "补办校园卡需携带本人身份证。")],
-                                        entailment_judge=_BoomJudge()))
+        out = _run(
+            g.annotate_citations(
+                "模糊陈述。", [_ev("A", "补办校园卡需携带本人身份证。")], entailment_judge=_BoomJudge()
+            )
+        )
     assert out["citation_indices"] == []
     assert out["claims"][0]["status"] == "insufficient"
 
@@ -421,13 +430,19 @@ def test_judge_fail_open_on_exception():
 def test_judge_retries_once_on_parse_failure():
     """Judge 输出非法 JSON → 重试一次；第二次合法则正常消费。"""
     client = AsyncMock()
-    client.messages.create = AsyncMock(side_effect=[
-        SimpleNamespace(content=[SimpleNamespace(type="text", text="不是JSON")]),
-        SimpleNamespace(content=[SimpleNamespace(type="text", text=(
-            '{"decisions": [{"claim": "模糊陈述。", "verdict": "supported", '
-            '"evidence_ids": [1]}]}'
-        ))]),
-    ])
+    client.messages.create = AsyncMock(
+        side_effect=[
+            SimpleNamespace(content=[SimpleNamespace(type="text", text="不是JSON")]),
+            SimpleNamespace(
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text=('{"decisions": [{"claim": "模糊陈述。", "verdict": "supported", "evidence_ids": [1]}]}'),
+                    )
+                ]
+            ),
+        ]
+    )
     judge = g.LLMEntailmentJudge(client=client, model="m", enabled=True)
     out = _run(judge.judge(["模糊陈述。"], [_ev("A", "补办校园卡需携带本人身份证。")]))
     assert client.messages.create.await_count == 2  # 恰好重试一次
@@ -438,9 +453,11 @@ def test_judge_retries_once_on_parse_failure():
 def test_judge_retry_exhausted_falls_back():
     """连续两次非法输出 → judge() 返回 {}（调用方 insufficient 兜底）。"""
     client = AsyncMock()
-    client.messages.create = AsyncMock(return_value=SimpleNamespace(
-        content=[SimpleNamespace(type="text", text="仍然不是JSON")],
-    ))
+    client.messages.create = AsyncMock(
+        return_value=SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="仍然不是JSON")],
+        )
+    )
     judge = g.LLMEntailmentJudge(client=client, model="m", enabled=True)
     out = _run(judge.judge(["模糊陈述。"], [_ev("A", "补办校园卡需携带本人身份证。")]))
     assert out == {}
@@ -463,16 +480,25 @@ def test_fuzzy_without_judge_falls_back_to_insufficient():
 
 def test_grounding_trace_fields():
     evs = [_ev("指南", "补办校园卡需携带本人身份证。")]
-    angles = {"补办校园卡需要身份证": 0.0, "费用为 20 元。": angle_for_cos(0.05),
-              "补办校园卡需携带本人身份证。": 0.0}
+    angles = {"补办校园卡需要身份证": 0.0, "费用为 20 元。": angle_for_cos(0.05), "补办校园卡需携带本人身份证。": 0.0}
     with _embed(angles):
         trace = _run(g.grounding_trace("补办校园卡需要身份证，费用为 20 元。", evs))
     assert trace["sentence_count"] == 1
     assert trace["claim_count"] == 2
     claim = trace["claims"][0]
-    for key in ("claim", "factual", "candidates", "selected_evidence_idx",
-                "best_dice", "best_cos", "hard_guard", "decision_source",
-                "status", "citation", "fuzzy"):
+    for key in (
+        "claim",
+        "factual",
+        "candidates",
+        "selected_evidence_idx",
+        "best_dice",
+        "best_cos",
+        "hard_guard",
+        "decision_source",
+        "status",
+        "citation",
+        "fuzzy",
+    ):
         assert key in claim, key
     assert claim["candidates"][0]["guard"]["conflict"] is False
     assert claim["status"] == "supported"

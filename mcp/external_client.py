@@ -16,6 +16,7 @@ initialize 握手 → tools/list 枚举 → tools/call 转发，把外部工具�
   - 工具名加前缀（默认 github_）避免与本地工具冲突；
   - 注册的工具默认 agent_exposed=False，由编排器显式暴露给指定 Agent。
 """
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,29 @@ _READ_SUFFIX = "_read"
 # 写操作关键词黑名单：命中任一即视为写工具，默认跳过注册。
 # 真实 server（GitHub）用 write/push/fork 等命名而非 create_*，黑名单必须覆盖。
 _WRITE_KEYWORDS = (
-    "create", "update", "delete", "remove", "merge", "close", "comment",
-    "review", "add", "assign", "transfer", "rename", "move", "mark", "set",
-    "write", "push", "fork", "run", "edit", "change", "open", "reply",
+    "create",
+    "update",
+    "delete",
+    "remove",
+    "merge",
+    "close",
+    "comment",
+    "review",
+    "add",
+    "assign",
+    "transfer",
+    "rename",
+    "move",
+    "mark",
+    "set",
+    "write",
+    "push",
+    "fork",
+    "run",
+    "edit",
+    "change",
+    "open",
+    "reply",
 )
 
 
@@ -136,14 +157,18 @@ class StreamableHTTPClient:
 
     async def initialize(self) -> Dict[str, Any]:
         """initialize 握手；返回 server 能力声明（result）。"""
-        resp = await self._post({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {
-                "protocolVersion": self._protocol_version,
-                "capabilities": {},
-                "clientInfo": {"name": "echoguide", "version": "0.1.0"},
-            },
-        })
+        resp = await self._post(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": self._protocol_version,
+                    "capabilities": {},
+                    "clientInfo": {"name": "echoguide", "version": "0.1.0"},
+                },
+            }
+        )
         return resp.get("result", {})
 
     async def list_tools(self) -> List[Dict[str, Any]]:
@@ -153,15 +178,17 @@ class StreamableHTTPClient:
 
     async def call_tool(self, name: str, arguments: Dict[str, Any]) -> tuple[str, bool]:
         """tools/call → (文本内容, is_error)。"""
-        resp = await self._post({
-            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": {"name": name, "arguments": arguments or {}},
-        })
+        resp = await self._post(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments or {}},
+            }
+        )
         result = resp.get("result", {})
         parts = [
-            c.get("text", "")
-            for c in result.get("content", [])
-            if isinstance(c, dict) and c.get("type") == "text"
+            c.get("text", "") for c in result.get("content", []) if isinstance(c, dict) and c.get("type") == "text"
         ]
         return "\n".join(parts), bool(result.get("isError", False))
 
@@ -199,6 +226,7 @@ class ExternalMCPSource:
                 return json.loads(text)
             except (TypeError, ValueError):
                 return text
+
         return handler
 
     async def setup(
@@ -253,15 +281,17 @@ class ExternalMCPSource:
                 schema = item.get("inputSchema")
                 if not isinstance(schema, dict):
                     schema = {"type": "object", "properties": {}}
-                tool_manager.register(Tool(
-                    name=full,
-                    description=str(item.get("description", "") or ""),
-                    handler=self._make_handler(client, name),
-                    schema=schema,
-                    timeout_s=30.0,
-                    agent_exposed=False,  # 默认不可见，由编排器显式暴露
-                    effect=effect,
-                ))
+                tool_manager.register(
+                    Tool(
+                        name=full,
+                        description=str(item.get("description", "") or ""),
+                        handler=self._make_handler(client, name),
+                        schema=schema,
+                        timeout_s=30.0,
+                        agent_exposed=False,  # 默认不可见，由编排器显式暴露
+                        effect=effect,
+                    )
+                )
                 registered.append(full)
         except Exception as ex:
             logger.error(f"外部 MCP 工具注册中断: {ex}")

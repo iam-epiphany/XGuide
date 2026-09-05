@@ -19,6 +19,7 @@ Working Memory（当前会话近期上下文）存 Redis，不计入 L0-L3。
     （与 personal/store.py 同模式）。
   - 每次操作新建连接（本地文件开销可忽略），天然规避线程共享连接问题。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,8 +29,9 @@ import json
 import logging
 import os
 import pathlib
-import sqlite3
 from typing import Any, Dict, List, Optional
+
+from core.sqlite import sqlite_session
 
 logger = logging.getLogger(__name__)
 
@@ -125,21 +127,9 @@ class LayeredStore:
 
     @contextmanager
     def _connect(self):
-        """
-        短生命周期连接：退出时自动 commit（异常则 rollback）并关闭。
-        与 sqlite3.Connection 原生 context manager 语义一致，且确保 Windows
-        下无文件锁残留（防泄漏）。
-        """
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
+        """短生命周期连接（WAL/busy_timeout/commit/close 见 core.sqlite.session）。"""
+        with sqlite_session(self.db_path) as conn:
             yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -163,9 +153,7 @@ class LayeredStore:
         写入一条原始消息，返回 raw_messages.id。
         turn_id 在事务内自增（会话内轮次序号），保证同一会话内单调且无并发冲突。
         """
-        return await self._run(
-            self._append_raw_sync, user_id, conv_id, role, content, meta or {}
-        )
+        return await self._run(self._append_raw_sync, user_id, conv_id, role, content, meta or {})
 
     def _append_raw_sync(
         self,
@@ -194,13 +182,9 @@ class LayeredStore:
         self, user_id: str, conv_id: str, start_turn: int = 0, limit: int = 500
     ) -> List[Dict[str, Any]]:
         """按轮次区间取 L0 原文（证据链下钻的读取端）。"""
-        return await self._run(
-            self._get_raw_range_sync, user_id, conv_id, start_turn, limit
-        )
+        return await self._run(self._get_raw_range_sync, user_id, conv_id, start_turn, limit)
 
-    def _get_raw_range_sync(
-        self, user_id: str, conv_id: str, start_turn: int, limit: int
-    ) -> List[Dict[str, Any]]:
+    def _get_raw_range_sync(self, user_id: str, conv_id: str, start_turn: int, limit: int) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM raw_messages
@@ -210,15 +194,11 @@ class LayeredStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    async def get_raw_by_turns(
-        self, user_id: str, conv_id: str, turns: List[int]
-    ) -> Dict[int, str]:
+    async def get_raw_by_turns(self, user_id: str, conv_id: str, turns: List[int]) -> Dict[int, str]:
         """按 turn_id 批量取原文（L1 事实 → L0 溯源的核心查询）。"""
         return await self._run(self._get_raw_by_turns_sync, user_id, conv_id, turns)
 
-    def _get_raw_by_turns_sync(
-        self, user_id: str, conv_id: str, turns: List[int]
-    ) -> Dict[int, str]:
+    def _get_raw_by_turns_sync(self, user_id: str, conv_id: str, turns: List[int]) -> Dict[int, str]:
         if not turns:
             return {}
         marks = ",".join("?" * len(turns))
@@ -278,18 +258,14 @@ class LayeredStore:
     def _count_raw_sync(self, user_id: Optional[str]) -> int:
         with self._connect() as conn:
             if user_id:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM raw_messages WHERE user_id = ?", (user_id,)
-                ).fetchone()
+                row = conn.execute("SELECT COUNT(*) FROM raw_messages WHERE user_id = ?", (user_id,)).fetchone()
             else:
                 row = conn.execute("SELECT COUNT(*) FROM raw_messages").fetchone()
         return row[0]
 
     # ── L1 原子事实 ──────────────────────────────────────────────────────────
 
-    async def add_facts(
-        self, user_id: str, facts: List[Dict[str, Any]]
-    ) -> int:
+    async def add_facts(self, user_id: str, facts: List[Dict[str, Any]]) -> int:
         """
         批量写入原子事实（新提炼结果）。
         与既有 active 事实按文本去重（LLM 合并后的重复提炼不落库）。
@@ -303,7 +279,8 @@ class LayeredStore:
         now = datetime.now().astimezone().isoformat()
         with self._connect() as conn:
             existing = {
-                r["fact"] for r in conn.execute(
+                r["fact"]
+                for r in conn.execute(
                     "SELECT fact FROM facts WHERE user_id = ? AND active = 1",
                     (user_id,),
                 ).fetchall()
@@ -337,9 +314,7 @@ class LayeredStore:
         """列出用户事实（默认只取 active，按时间倒序）。"""
         return await self._run(self._list_facts_sync, user_id, category, active_only)
 
-    def _list_facts_sync(
-        self, user_id: str, category: Optional[str], active_only: bool
-    ) -> List[Dict[str, Any]]:
+    def _list_facts_sync(self, user_id: str, category: Optional[str], active_only: bool) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM facts WHERE user_id = ?"
         args: List[Any] = [user_id]
         if category:
@@ -375,23 +350,15 @@ class LayeredStore:
                     (user_id,),
                 ).fetchone()
             else:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM facts WHERE active = 1"
-                ).fetchone()
+                row = conn.execute("SELECT COUNT(*) FROM facts WHERE active = 1").fetchone()
         return row[0]
 
     # ── L3 画像版本历史（治理：可回滚）──────────────────────────────────────
 
-    async def save_profile_version(
-        self, user_id: str, profile_json: str, reason: str = ""
-    ) -> int:
-        return await self._run(
-            self._save_profile_version_sync, user_id, profile_json, reason
-        )
+    async def save_profile_version(self, user_id: str, profile_json: str, reason: str = "") -> int:
+        return await self._run(self._save_profile_version_sync, user_id, profile_json, reason)
 
-    def _save_profile_version_sync(
-        self, user_id: str, profile_json: str, reason: str
-    ) -> int:
+    def _save_profile_version_sync(self, user_id: str, profile_json: str, reason: str) -> int:
         with self._connect() as conn:
             cur = conn.execute(
                 """INSERT INTO profile_history (user_id, profile_json, reason, ts)
@@ -400,15 +367,11 @@ class LayeredStore:
             )
             return cur.lastrowid
 
-    async def list_profile_versions(
-        self, user_id: str, limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    async def list_profile_versions(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """画像版本列表（倒序：v0 最新）。"""
         return await self._run(self._list_profile_versions_sync, user_id, limit)
 
-    def _list_profile_versions_sync(
-        self, user_id: str, limit: int
-    ) -> List[Dict[str, Any]]:
+    def _list_profile_versions_sync(self, user_id: str, limit: int) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM profile_history
@@ -417,15 +380,11 @@ class LayeredStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    async def get_profile_version(
-        self, user_id: str, version_id: int
-    ) -> Optional[Dict[str, Any]]:
+    async def get_profile_version(self, user_id: str, version_id: int) -> Optional[Dict[str, Any]]:
         """回滚读取：取指定版本画像快照。"""
         return await self._run(self._get_profile_version_sync, user_id, version_id)
 
-    def _get_profile_version_sync(
-        self, user_id: str, version_id: int
-    ) -> Optional[Dict[str, Any]]:
+    def _get_profile_version_sync(self, user_id: str, version_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM profile_history WHERE id = ? AND user_id = ?",
@@ -444,30 +403,21 @@ class LayeredStore:
                     (user_id,),
                 ).fetchone()
             else:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM profile_history"
-                ).fetchone()
+                row = conn.execute("SELECT COUNT(*) FROM profile_history").fetchone()
         return row[0]
 
     # ── 上下文卸载（refs 落盘）───────────────────────────────────────────────
 
-    async def save_ref(
-        self, user_id: str, conv_id: str, tool: str, content: str
-    ) -> int:
+    async def save_ref(self, user_id: str, conv_id: str, tool: str, content: str) -> int:
         """工具完整结果落盘，返回 refs.id 供上下文索引引用。"""
-        return await self._run(
-            self._save_ref_sync, user_id, conv_id, tool, content
-        )
+        return await self._run(self._save_ref_sync, user_id, conv_id, tool, content)
 
-    def _save_ref_sync(
-        self, user_id: str, conv_id: str, tool: str, content: str
-    ) -> int:
+    def _save_ref_sync(self, user_id: str, conv_id: str, tool: str, content: str) -> int:
         with self._connect() as conn:
             cur = conn.execute(
                 """INSERT INTO refs (user_id, conv_id, tool, content, char_len, ts)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (user_id, conv_id, tool, content, len(content),
-                 datetime.now().astimezone().isoformat()),
+                (user_id, conv_id, tool, content, len(content), datetime.now().astimezone().isoformat()),
             )
             return cur.lastrowid
 
@@ -475,9 +425,7 @@ class LayeredStore:
         """按 id 取卸载的完整结果（100% 找回的读取端）。"""
         return await self._run(self._get_ref_sync, user_id, ref_id)
 
-    def _get_ref_sync(
-        self, user_id: str, ref_id: int
-    ) -> Optional[Dict[str, Any]]:
+    def _get_ref_sync(self, user_id: str, ref_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM refs WHERE id = ? AND user_id = ?",
@@ -491,9 +439,7 @@ class LayeredStore:
     def _count_refs_sync(self, user_id: Optional[str]) -> int:
         with self._connect() as conn:
             if user_id:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM refs WHERE user_id = ?", (user_id,)
-                ).fetchone()
+                row = conn.execute("SELECT COUNT(*) FROM refs WHERE user_id = ?", (user_id,)).fetchone()
             else:
                 row = conn.execute("SELECT COUNT(*) FROM refs").fetchone()
         return row[0]
@@ -517,8 +463,12 @@ class LayeredStore:
         返回各表清理条数统计。
         """
         return await self._run(
-            self._prune_sync, user_id, raw_ttl_days, ref_ttl_days,
-            fact_ttl_days, max_profile_versions,
+            self._prune_sync,
+            user_id,
+            raw_ttl_days,
+            ref_ttl_days,
+            fact_ttl_days,
+            max_profile_versions,
         )
 
     def _prune_sync(
@@ -537,21 +487,20 @@ class LayeredStore:
             base = "WHERE user_id = ?" if user_id else ""
 
             cur = conn.execute(
-                f"DELETE FROM raw_messages {base} AND ts < ?" if base
-                else "DELETE FROM raw_messages WHERE ts < ?",
+                f"DELETE FROM raw_messages {base} AND ts < ?" if base else "DELETE FROM raw_messages WHERE ts < ?",
                 ([user_id, raw_cut] if base else [raw_cut]),
             )
             stats["raw"] = cur.rowcount
 
             cur = conn.execute(
-                f"DELETE FROM refs {base} AND ts < ?" if base
-                else "DELETE FROM refs WHERE ts < ?",
+                f"DELETE FROM refs {base} AND ts < ?" if base else "DELETE FROM refs WHERE ts < ?",
                 ([user_id, ref_cut] if base else [ref_cut]),
             )
             stats["refs"] = cur.rowcount
 
             cur = conn.execute(
-                f"DELETE FROM facts {base} AND active = 0 AND ts < ?" if base
+                f"DELETE FROM facts {base} AND active = 0 AND ts < ?"
+                if base
                 else "DELETE FROM facts WHERE active = 0 AND ts < ?",
                 ([user_id, fact_cut] if base else [fact_cut]),
             )
@@ -559,8 +508,7 @@ class LayeredStore:
 
             # profile_history：每人保留最近 max_profile_versions 版
             rows = conn.execute(
-                "SELECT user_id FROM profile_history" + (" WHERE user_id = ?" if user_id else "")
-                + " GROUP BY user_id",
+                "SELECT user_id FROM profile_history" + (" WHERE user_id = ?" if user_id else "") + " GROUP BY user_id",
                 ([user_id] if user_id else []),
             ).fetchall()
             for row in rows:

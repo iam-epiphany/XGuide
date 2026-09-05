@@ -7,13 +7,31 @@
   - "下周一考高数"              → add_todo（kind=exam）
   - "把XX标记为完成"            → complete_todo
 """
+
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict
 
 from personal.service import PersonalService
 
 KINDS = {"todo", "ddl", "exam"}
+
+
+def _valid_due_at(due_at: str) -> bool:
+    """due_at 必须是 "YYYY-MM-DD" 或 "YYYY-MM-DD HH:MM"。
+
+    不校验直接入库的话，坏值会在 upcoming()/overview() 的
+    date.fromisoformat 处抛异常，query_ddl/overview 对该用户持续失败。
+    """
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            # astimezone 只为满足 DTZ（naive datetime）；此处仅做格式校验，不使用该值
+            datetime.strptime(due_at, fmt).astimezone()
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def _user_id(context: Any) -> str:
@@ -71,6 +89,12 @@ async def add_todo_handler(params: Dict[str, Any], context: Any) -> Dict[str, An
     if kind not in KINDS:
         kind = "todo"
     due_at = str(params.get("due_at", "")).strip() or None
+    if due_at and not _valid_due_at(due_at):
+        return {
+            "available": False,
+            "message": f"due_at 格式无效：{due_at!r}。请给出 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM'；"
+            "相对时间（如'周三下午'）请先换算成具体日期。",
+        }
 
     todo = await service.add_todo(_user_id(context), content, kind=kind, due_at=due_at)
     return {"available": True, "message": "已记录", "todo": todo}
@@ -117,7 +141,13 @@ async def update_todo_handler(params: Dict[str, Any], context: Any) -> Dict[str,
         return {"available": False, "message": "kind 仅支持 todo/ddl/exam。"}
     content = params.get("content")
     due_at = params.get("due_at")
-    todo = await service.update_todo(_user_id(context), todo_id, content=str(content).strip() if content is not None else None, kind=kind, due_at=str(due_at).strip() if due_at is not None else None)
+    todo = await service.update_todo(
+        _user_id(context),
+        todo_id,
+        content=str(content).strip() if content is not None else None,
+        kind=kind,
+        due_at=str(due_at).strip() if due_at is not None else None,
+    )
     if todo is None:
         return {"available": False, "message": "待办不存在，或没有可更新的字段。"}
     return {"available": True, "message": "已更新", "todo": todo}

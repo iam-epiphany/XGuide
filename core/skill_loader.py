@@ -11,6 +11,7 @@ Skill 是一段可热加载的业务能力说明，用来补充 Agent 的 system
   2. 追问感知：当前消息未命中时，会继续匹配最近 2 轮用户消息，
      保证"南校区食堂几点关门？→ 那几点开门呢？"这类追问仍能注入对应 SOP。
 """
+
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Skill:
     """单个 Skill 的标准化表示，屏蔽 Markdown/JSON 等不同文件格式差异。"""
+
     name: str
     description: str
     content: str
@@ -178,7 +180,7 @@ class SkillManager:
             catalog_lines.append(f"- {skill.skill_id}: {skill.name}{desc} 触发词: {kws}")
         catalog = "\n".join(catalog_lines)
         if len(catalog) > self.max_prompt_chars:
-            catalog = catalog[:self.max_prompt_chars].rstrip() + "\n..."
+            catalog = catalog[: self.max_prompt_chars].rstrip() + "\n..."
 
         # 2. 命中提示（免费关键词引导）
         matched_names = []
@@ -187,15 +189,14 @@ class SkillManager:
                 matched_names.append(skill)
         hint = ""
         if matched_names:
-            refs = "、".join(
-                f"{skill.name}（{skill.skill_id}）" for skill in matched_names
-            )
+            refs = "、".join(f"{skill.name}（{skill.skill_id}）" for skill in matched_names)
             hint = f"\n该请求可能涉及以下技能，可调用对应工具获取完整规范：{refs}"
 
         self._record_discovery(message, matched_names)
         logger.info(
             "Skills 注入: 目录 %d 个, 命中提示 %s, message=%r",
-            len(self._skills), (matched_names and "、".join(s.name for s in matched_names)) or "-",
+            len(self._skills),
+            (matched_names and "、".join(s.name for s in matched_names)) or "-",
             (message or "")[:80],
         )
         return (
@@ -207,18 +208,20 @@ class SkillManager:
 
     def tool_definitions(self) -> List[Dict[str, Any]]:
         """提供唯一只读加载工具，避免 Skill 数量增长时函数 schema 膨胀。"""
-        return [{
-            "name": "load_skill",
-            "description": "按 skill_name 加载一个 EchoGuide Skill 的完整 SOP；仅读取本地 Skill 正文，不授予任何工具或写入权限。",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "skill_name": {"type": "string", "enum": [s.skill_id for s in self._skills]},
+        return [
+            {
+                "name": "load_skill",
+                "description": "按 skill_name 加载一个 EchoGuide Skill 的完整 SOP；仅读取本地 Skill 正文，不授予任何工具或写入权限。",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name": {"type": "string", "enum": [s.skill_id for s in self._skills]},
+                    },
+                    "required": ["skill_name"],
+                    "additionalProperties": False,
                 },
-                "required": ["skill_name"],
-                "additionalProperties": False,
-            },
-        }]
+            }
+        ]
 
     def get_skill(self, skill_name: str) -> Optional[Skill]:
         """按稳定 skill id 查询；不接受文件路径，防止路径穿越。"""
@@ -252,10 +255,9 @@ class SkillManager:
         """Skill 注入 prompt 的缓存键（消息 + 最近 2 轮用户消息指纹）。"""
         fp = ""
         if history:
-            tail = "|".join(
-                str(m.get("content", "")) for m in history[-2:]
-            )
+            tail = "|".join(str(m.get("content", "")) for m in history[-2:])
             import hashlib
+
             fp = hashlib.md5(tail.encode("utf-8")).hexdigest()[:8]
         return f"{str(message)[:200]}#{fp}"
 
@@ -282,11 +284,13 @@ class SkillManager:
                 keywords = ", ".join(skill.keywords[:8]) if skill.keywords else "all"
                 if len(skill.keywords) > 8:
                     keywords += ", ..."
-                lines.extend([
-                    f"{index}. {skill.skill_id}: {skill.name}",
-                    f"   keywords: {keywords}",
-                    f"   path: {skill.path}",
-                ])
+                lines.extend(
+                    [
+                        f"{index}. {skill.skill_id}: {skill.name}",
+                        f"   keywords: {keywords}",
+                        f"   path: {skill.path}",
+                    ]
+                )
         else:
             lines.append("未加载任何 Skill。")
 
@@ -329,6 +333,7 @@ class SkillManager:
     @staticmethod
     def _record_discovery(message: str, matched: List[Skill]) -> None:
         from core.tracing import current_trace
+
         trace = current_trace()
         if trace is not None:
             trace.tags["skills_prompted"] = ",".join(skill.skill_id for skill in matched) or "-"
@@ -336,9 +341,12 @@ class SkillManager:
     @staticmethod
     def _record_load(skill_name: str) -> None:
         from core.tracing import current_trace
+
         trace = current_trace()
         if trace is not None:
-            trace.tags["skills_loaded"] = ",".join(filter(None, [str(trace.tags.get("skills_loaded", "")).strip(","), skill_name]))
+            trace.tags["skills_loaded"] = ",".join(
+                filter(None, [str(trace.tags.get("skills_loaded", "")).strip(","), skill_name])
+            )
 
     def _split_front_matter(self, raw: str) -> tuple[Dict[str, Any], str]:
         """
@@ -367,7 +375,7 @@ class SkillManager:
 
         if end_idx is None:
             return {}, raw
-        return meta, "\n".join(lines[end_idx + 1:])
+        return meta, "\n".join(lines[end_idx + 1 :])
 
     @staticmethod
     def _first_heading(body: str) -> Optional[str]:

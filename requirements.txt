@@ -4,17 +4,21 @@
 anthropic==0.109.1         # DeepSeek V4 Anthropic 兼容调用（thinking/output_config/新版流式）
 
 # ── Web 框架 ──────────────────────────────────────────────────────────────────
-fastapi==0.115.5
+# 0.141.x：跟进 starlette 1.x 安全修复（0.115.x 钉死 starlette<0.42，累积 8 条已披露 CVE）
+fastapi==0.141.1
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
-python-multipart==0.0.12    # FastAPI 文件上传支持
+python-multipart==0.0.31    # FastAPI 文件上传支持（0.0.12 积累 8 条 CVE，0.0.31 全部修复）
 
 # ── 数据存储 ──────────────────────────────────────────────────────────────────
 redis==5.2.1
-chromadb==0.5.23           # 向量数据库（长期记忆）
+# 1.x：2026-09 已从 0.5.23 迁移（EmbeddingFunction 需实现 name()/get_config() 协议）。
+# CVE-2026-45830/45831/45833 与 PYSEC-2026-311 在最新版仍未修复（CI audit 显式豁免），
+# 0.5.x 永远等不到修复，1.x 是唯一能吃到未来补丁的线
+chromadb==1.5.9            # 向量数据库（长期记忆）
 
 # ── 本地向量模型（Embedding/Rerank，ONNX 轻量推理，无 torch）────────────────
-tokenizers==0.20.3         # bge tokenizer（chromadb 0.5.23 约束 <=0.20.3；0.22.x 会解析失败）
+tokenizers==0.20.3         # bge tokenizer（与 chromadb 1.5.9 兼容）
 onnxruntime==1.28.0        # ONNX 推理（bge-small-zh-v1.5 / bge-reranker-base）
 numpy==2.3.5               # 向量计算（chromadb 亦依赖，显式钉版本）
 
@@ -28,4 +32,4 @@ prometheus-client==0.21.1
 httpx==0.28.1              # monitor/performance_monitor.py webhook 告警
 
 # ── 工具 ──────────────────────────────────────────────────────────────────────
-python-dotenv==1.0.1
+python-dotenv==1.2.2

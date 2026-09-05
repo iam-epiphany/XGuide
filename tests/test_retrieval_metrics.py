@@ -1,4 +1,5 @@
 """RAG 检索硬指标测试：HitRate@K / Recall@K / MRR 纯函数 + 引用正确性（无需 LLM）。"""
+
 from __future__ import annotations
 
 from evaluation.evaluator import citation_correctness, compute_retrieval_metrics
@@ -6,14 +7,14 @@ from evaluation.evaluator import citation_correctness, compute_retrieval_metrics
 
 def test_retrieval_metrics_hit_recall_mrr():
     results = [
-        [{"title": "选课指南"}, {"title": "校历"}],   # 相关在 rank1 → MRR 1.0
-        [{"title": "食堂"}, {"title": "选课指南"}],    # 相关在 rank2 → MRR 0.5
-        [{"title": "图书馆"}, {"title": "宿舍"}],      # 无相关 → MRR 0
+        [{"title": "选课指南"}, {"title": "校历"}],  # 相关在 rank1 → MRR 1.0
+        [{"title": "食堂"}, {"title": "选课指南"}],  # 相关在 rank2 → MRR 0.5
+        [{"title": "图书馆"}, {"title": "宿舍"}],  # 无相关 → MRR 0
     ]
     relevant = [["选课指南"], ["选课指南"], ["选课指南"]]
     m = compute_retrieval_metrics(results, relevant, top_k=2)
     assert m["hit_rate@K"] == round(2 / 3, 4)
-    assert m["recall@K"] == round(2 / 3, 4)   # 前两个用例的相关被召回，第三个未召回
+    assert m["recall@K"] == round(2 / 3, 4)  # 前两个用例的相关被召回，第三个未召回
     assert m["mrr"] == round((1.0 + 0.5 + 0.0) / 3, 4)
     assert m["total"] == 3
     assert m["top_k"] == 2

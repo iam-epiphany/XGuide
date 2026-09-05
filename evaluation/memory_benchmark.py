@@ -17,6 +17,7 @@
 
 运行：python evaluation/memory_benchmark.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,17 +40,17 @@ from memory.layered_store import (
 
 # 10 轮模拟对话：混合普通提问与画像信号句（"我最近在准备考研"等）
 SIMULATED_TURNS = [
-    ("user",   "南校区图书馆几点关门？"),
+    ("user", "南校区图书馆几点关门？"),
     ("assistant", "南校区图书馆周一至周五 8:00-22:00 开放，周末 9:00-21:30。"),
-    ("user",   "我最近在准备考研，想找个晚上开放的自习室"),
+    ("user", "我最近在准备考研，想找个晚上开放的自习室"),
     ("assistant", "图书馆四楼自习区开放到 22:30，凭校园卡进入。"),
-    ("user",   "我是通信工程学院大二的，在南校区"),
+    ("user", "我是通信工程学院大二的，在南校区"),
     ("assistant", "通信工程学院大二课程多在信远楼，南校区主教学楼为信远一区。"),
-    ("user",   "那实验室晚上几点关门？"),
+    ("user", "那实验室晚上几点关门？"),
     ("assistant", "学院实验室一般 21:30 关闭，部分开放到 22:00。"),
-    ("user",   "帮我记个待办：周三下午去校医院补办校园卡"),
+    ("user", "帮我记个待办：周三下午去校医院补办校园卡"),
     ("assistant", "好的，已为你记录待办：周三下午补办校园卡。"),
-    ("user",   "好的谢谢"),
+    ("user", "好的谢谢"),
     ("assistant", "不客气，有需要随时找我。"),
 ]
 
@@ -73,8 +74,7 @@ def _signal_stats(turns) -> dict:
         # 与 update_profile 相同口径：只看最近 2 条用户消息
         if _has_profile_signal(msgs[:i]):
             hits += 1
-    return {"user_turns": total, "signal_hits": hits,
-            "rate_pct": round(hits / total * 100, 1) if total else 0.0}
+    return {"user_turns": total, "signal_hits": hits, "rate_pct": round(hits / total * 100, 1) if total else 0.0}
 
 
 def _offload_stats(results: list) -> dict:
@@ -87,8 +87,7 @@ def _offload_stats(results: list) -> dict:
         t_full = estimate_tokens(text)
         # 与 agent_orchestrator 卸载逻辑同口径：摘要 OFFLOAD_SUMMARY_CHARS + 索引行
         if len(text) > OFFLOAD_CHARS:
-            summary_line = (f"{text[:OFFLOAD_SUMMARY_CHARS]}..."
-                            f"[完整结果 refs/{i + 1}，共 {len(text)} 字符]")
+            summary_line = f"{text[:OFFLOAD_SUMMARY_CHARS]}...[完整结果 refs/{i + 1}，共 {len(text)} 字符]"
             t_off = estimate_tokens(summary_line)
             offloaded_chars += len(text) - len(summary_line)
         else:
@@ -96,10 +95,14 @@ def _offload_stats(results: list) -> dict:
             t_off = t_full
         full_tokens += t_full
         offload_tokens += t_off
-        items.append({
-            "char_len": len(text), "full_tokens": t_full,
-            "offload_tokens": t_off, "offloaded_chars": len(text) - len(summary_line),
-        })
+        items.append(
+            {
+                "char_len": len(text),
+                "full_tokens": t_full,
+                "offload_tokens": t_off,
+                "offloaded_chars": len(text) - len(summary_line),
+            }
+        )
     return {
         "items": items,
         "full_tokens": full_tokens,
@@ -127,7 +130,12 @@ async def _layered_replay(tmp_db: str) -> dict:
         {"fact": "用户在准备考研", "category": "status", "source_conv": "conv_1", "source_turn": 3},
         {"fact": "用户是通信工程学院大二学生", "category": "entity", "source_conv": "conv_1", "source_turn": 5},
         {"fact": "用户在南校区", "category": "entity", "source_conv": "conv_1", "source_turn": 5},
-        {"fact": "周三下午去校医院补办校园卡（待办）", "category": "decision", "source_conv": "conv_1", "source_turn": 9},
+        {
+            "fact": "周三下午去校医院补办校园卡（待办）",
+            "category": "decision",
+            "source_conv": "conv_1",
+            "source_turn": 9,
+        },
     ]
     added = await store.add_facts("u_bench", facts)
     # 重复提炼去重断言
@@ -136,8 +144,10 @@ async def _layered_replay(tmp_db: str) -> dict:
     by_turn = await store.get_raw_by_turns("u_bench", "conv_1", [f["source_turn"] for f in facts])
     traceable = sum(1 for f in facts if f["source_turn"] in by_turn)
     result["facts"] = {
-        "added": added, "dup_skipped": added_dup == 0,
-        "traceable": traceable, "total": len(facts),
+        "added": added,
+        "dup_skipped": added_dup == 0,
+        "traceable": traceable,
+        "total": len(facts),
         "traceback_pct": round(traceable / len(facts) * 100, 1),
         "evidence_sample": by_turn.get(3, "")[:18] + "...",  # 下钻到原文的样例
     }
@@ -165,33 +175,38 @@ async def _layered_replay(tmp_db: str) -> dict:
         ref = await store.get_ref("u_bench", rid)
         if ref is not None and ref.get("content") is not None:
             recovered += 1
-    result["refs"] = {"saved": len(ref_ids), "recovered": recovered,
-                      "recover_pct": round(recovered / len(ref_ids) * 100, 1)}
+    result["refs"] = {
+        "saved": len(ref_ids),
+        "recovered": recovered,
+        "recover_pct": round(recovered / len(ref_ids) * 100, 1),
+    }
 
     # ── 增量提炼水位（对齐 TencentDB-Agent-Memory）─────────────────────────
     # 模拟两轮提炼：首次全量预热，第二轮只取水位之后的新消息（老消息零重复输入）
     await store.append_raw("u_bench", "conv_2", "user", "我准备考研，帮我推荐复习资料")
     await store.append_raw("u_bench", "conv_2", "assistant", "已为你整理考研资料清单。")
-    mark0 = await store.get_extract_mark("u_bench", "conv_2")          # 0：无记录 → 首次全量
+    mark0 = await store.get_extract_mark("u_bench", "conv_2")  # 0：无记录 → 首次全量
     first_batch = await store.get_raw_range("u_bench", "conv_2", mark0 + 1)
-    await store.set_extract_mark("u_bench", "conv_2", 2)               # 第一次提炼：水位推进到 2
+    await store.set_extract_mark("u_bench", "conv_2", 2)  # 第一次提炼：水位推进到 2
     await store.append_raw("u_bench", "conv_2", "user", "我决定考西电本校的研究生")
     await store.append_raw("u_bench", "conv_2", "assistant", "西电本校考研欢迎你。")
     mark1 = await store.get_extract_mark("u_bench", "conv_2")
     increment = await store.get_raw_range("u_bench", "conv_2", mark1 + 1)
     # 全窗口重提炼（旧实现）会读 4 条（含 2 条老消息）；增量只读水位后 2 条
     result["extract_mark"] = {
-        "first_pass_full": len(first_batch) == 2,     # 首次全量预热
-        "increment_only": len(increment) == 2,        # 增量区间只含新消息
-        "reused_msgs": max(0, 2 - len(increment)),    # 老消息重复输入数 = 0
+        "first_pass_full": len(first_batch) == 2,  # 首次全量预热
+        "increment_only": len(increment) == 2,  # 增量区间只含新消息
+        "reused_msgs": max(0, 2 - len(increment)),  # 老消息重复输入数 = 0
     }
 
     # ── 治理：失效标记 + prune 清理 ─────────────────────────────────────────
     deactivated = await store.deactivate_fact("u_bench", (await store.list_facts("u_bench"))[0]["id"])
-    stats = await store.prune("u_bench", raw_ttl_days=0, ref_ttl_days=0,
-                              fact_ttl_days=0, max_profile_versions=1)
-    result["governance"] = {"deactivate_ok": deactivated, "prune": stats,
-                            "active_facts_left": await store.count_facts("u_bench")}
+    stats = await store.prune("u_bench", raw_ttl_days=0, ref_ttl_days=0, fact_ttl_days=0, max_profile_versions=1)
+    result["governance"] = {
+        "deactivate_ok": deactivated,
+        "prune": stats,
+        "active_facts_left": await store.count_facts("u_bench"),
+    }
     return result
 
 
@@ -213,14 +228,18 @@ if __name__ == "__main__":
     # 摘要行（README / 简历直接引用）
     off, sig, lay = rep["offload"], rep["signal"], rep["layers"]
     print("\n===== 摘要 =====")
-    print(f"上下文卸载：{len(off['items'])} 个长工具结果，"
-          f"全量 {off['full_tokens']} tokens → 卸载后 {off['offload_tokens']} tokens，"
-          f"节省 {off['saved_pct']}%")
+    print(
+        f"上下文卸载：{len(off['items'])} 个长工具结果，"
+        f"全量 {off['full_tokens']} tokens → 卸载后 {off['offload_tokens']} tokens，"
+        f"节省 {off['saved_pct']}%"
+    )
     print(f"L0 原文全量落库：{lay['raw']['turns']} 轮 / 100% 保留")
     print(f"L1 原子事实溯源：{lay['facts']['traceback_pct']}%（证据链可下钻到 L0 原文）")
     print(f"L3 画像版本：{lay['profile']['versions']} 版，回滚 {'OK' if lay['profile']['rollback_ok'] else 'FAIL'}")
     print(f"refs 卸载找回：{lay['refs']['recover_pct']}%（100% 可恢复）")
     print(f"画像提炼信号率：{sig['rate_pct']}%（仅信号句触发 LLM 提炼，控制成本）")
     em = lay["extract_mark"]
-    print(f"增量提炼：首次全量预热 {'OK' if em['first_pass_full'] else 'FAIL'}，"
-          f"后续仅提炼新消息（老消息重复输入 {em['reused_msgs']} 条）")
+    print(
+        f"增量提炼：首次全量预热 {'OK' if em['first_pass_full'] else 'FAIL'}，"
+        f"后续仅提炼新消息（老消息重复输入 {em['reused_msgs']} 条）"
+    )

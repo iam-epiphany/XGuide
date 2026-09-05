@@ -32,4 +32,3 @@ def with_service(handler: Callable, **deps: Any) -> Callable:
         return await handler(params, ctx)
 
     return wrapped
-

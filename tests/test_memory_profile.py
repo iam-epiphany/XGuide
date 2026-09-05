@@ -3,6 +3,7 @@
 画像提炼的成本控制核心：只有用户消息包含"偏好/背景声明"（画像信号）时
 才调用 LLM 提炼，普通提问不触发。本测试验证信号检测的纯逻辑。
 """
+
 from __future__ import annotations
 
 from memory.conversation_memory import Message, MsgRole, _has_profile_signal
@@ -10,10 +11,7 @@ from memory.conversation_memory import Message, MsgRole, _has_profile_signal
 
 def _msgs(*texts) -> list:
     """构造消息列表，确保最后一条是用户消息（模拟"最近一条用户消息"）。"""
-    msgs = [
-        Message(role=MsgRole.USER if i % 2 == 0 else MsgRole.ASSISTANT, content=t)
-        for i, t in enumerate(texts)
-    ]
+    msgs = [Message(role=MsgRole.USER if i % 2 == 0 else MsgRole.ASSISTANT, content=t) for i, t in enumerate(texts)]
     if msgs and msgs[-1].role != MsgRole.USER:
         msgs[-1] = Message(role=MsgRole.USER, content=texts[-1])
     return msgs

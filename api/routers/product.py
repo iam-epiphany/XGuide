@@ -1,4 +1,5 @@
 """产品化路由：Today、提醒、学生画像与校园通知 Inbox。"""
+
 from __future__ import annotations
 
 from typing import List, Literal, Optional
@@ -24,6 +25,12 @@ def _radar():
     return state._campus_radar
 
 
+def _briefing():
+    if state._briefing_service is None:
+        raise HTTPException(503, "简报服务未初始化")
+    return state._briefing_service
+
+
 class TodoUpdateBody(BaseModel):
     content: Optional[str] = Field(default=None, min_length=1, max_length=500)
     kind: Optional[Literal["todo", "ddl", "exam"]] = None
@@ -35,7 +42,9 @@ class ProfileBody(BaseModel):
     major: str = Field(default="", max_length=100)
     grade: str = Field(default="", max_length=32)
     education: Literal["", "本科生", "研究生"] = ""
-    interests: List[Literal["保研", "奖学金", "竞赛", "就业", "考研", "出国"]] = Field(default_factory=list, max_length=6)
+    interests: List[Literal["保研", "奖学金", "竞赛", "就业", "考研", "出国"]] = Field(
+        default_factory=list, max_length=6
+    )
 
 
 class InboxStatusBody(BaseModel):
@@ -65,6 +74,36 @@ async def free_time(when: str = "今天", user=Depends(require_user)):
         raise HTTPException(400, str(ex)) from ex
 
 
+@router.get("/personal/today/briefing")
+async def today_briefing(user=Depends(require_user)):
+    """LLM 晨间简报：基于当日课程/待办/DDL 与 Inbox 今日关注的自然语言晨报。
+
+    结果按（用户, 日期, 输入指纹）缓存；数据未变时重复请求不再调用 LLM。
+    Inbox 不可用只影响"今日关注"素材，不影响简报生成。
+    """
+    overview = await _personal().overview(user.id)
+    focus: List[dict] = []
+    try:
+        profile = await _personal().store.get_profile(user.id)
+        briefing = await _radar().inbox_briefing(user.id, profile)
+        focus = briefing.get("today_focus", [])[:3]
+    except Exception:  # Inbox 不可用只影响"今日关注"素材，不拖垮简报
+        focus = []
+    return await _briefing().today_briefing(user.id, overview, focus)
+
+
+@router.get("/personal/free-time/advice")
+async def free_time_advice(when: str = "今天", user=Depends(require_user)):
+    """LLM 空档利用建议：把待办/DDL 安排进当天真实空闲时段（逐条校验后返回）。"""
+    try:
+        free = await _personal().free_time(user.id, when)
+    except ValueError as ex:
+        raise HTTPException(400, str(ex)) from ex
+    todos = await _personal().list_todos(user.id, status="open")
+    upcoming = await _personal().upcoming(user.id, horizon_days=7)
+    return await _briefing().free_time_advice(user.id, free["date"], free["free_periods"], todos, upcoming)
+
+
 @router.patch("/personal/todo/{todo_id}")
 async def update_todo(todo_id: int, body: TodoUpdateBody, user=Depends(require_user)):
     due_at = "" if "due_at" in body.model_fields_set and body.due_at is None else body.due_at
@@ -87,11 +126,19 @@ async def save_profile(body: ProfileBody, user=Depends(require_user)):
 @router.post("/inbox/refresh")
 async def refresh_inbox(user=Depends(require_user)):
     # 拉取仅来自公开官方网页，不传递用户画像或任何认证信息到外部站点。
-    return await _radar().refresh()
+    # 冷却期（600s）内重复触发直接复用上次结果：避免连点/多用户同时刷新
+    # 放大对源站的请求量；并发进行中的 refresh 由 radar 内部互斥兜底。
+    radar = _radar()
+    cached = radar.cached_result()
+    if cached is not None:
+        return cached
+    return await radar.refresh()
 
 
 @router.get("/inbox")
-async def inbox(status: Literal["active", "all", "new", "seen", "interested", "ignored"] = "active", user=Depends(require_user)):
+async def inbox(
+    status: Literal["active", "all", "new", "seen", "interested", "ignored"] = "active", user=Depends(require_user)
+):
     profile = await _personal().store.get_profile(user.id)
     events = await _radar().inbox(user.id, profile, status)
     profile_complete = bool(profile.get("education") or profile.get("interests"))
@@ -116,6 +163,14 @@ async def inbox_briefing(user=Depends(require_user)):
         "delivery_mode": "personalized" if profile_complete else "recent_public",
         "ttl_hours": _radar().inbox_ttl_hours,
     }
+
+
+@router.get("/inbox/narrative")
+async def inbox_narrative(user=Depends(require_user)):
+    """LLM 收件箱摘要：对今日聚合结果的 60-120 字中文叙述（带缓存）。"""
+    profile = await _personal().store.get_profile(user.id)
+    briefing = await _radar().inbox_briefing(user.id, profile)
+    return await _briefing().inbox_narrative(user.id, briefing)
 
 
 @router.post("/inbox/{event_id}/status")

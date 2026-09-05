@@ -9,6 +9,7 @@
 
 所有测试只测确定性逻辑，LLM 调用全部 mock，不触发真实网络请求。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,10 +26,7 @@ def _search_tool(use_rewrite: bool = True) -> Tool:
 
     async def handler(params, context):
         calls.append(params)
-        return [
-            {"title": f"文档{i}", "content": f"内容{i}", "score": 0.9 - i * 0.1}
-            for i in range(3)
-        ]
+        return [{"title": f"文档{i}", "content": f"内容{i}", "score": 0.9 - i * 0.1} for i in range(3)]
 
     tool = Tool(
         name="fake_search",
@@ -56,17 +54,24 @@ def test_use_rewrite_tool_routes_through_rewrite_chain():
     tool = _search_tool(use_rewrite=True)
     tm.register(tool)
 
-    with patch.object(
-        tm, "rewrite_query",
-        new=AsyncMock(return_value=["选课流程", "选课分几个阶段", "选课有什么要求"]),
-    ), patch.object(
-        tm, "_rerank",
-        new=AsyncMock(side_effect=lambda q, items, k: items[:k]),
+    with (
+        patch.object(
+            tm,
+            "rewrite_query",
+            new=AsyncMock(return_value=["选课流程", "选课分几个阶段", "选课有什么要求"]),
+        ),
+        patch.object(
+            tm,
+            "_rerank",
+            new=AsyncMock(side_effect=lambda q, items, k: items[:k]),
+        ),
     ):
-        result = asyncio.run(tm.call(
-            "fake_search",
-            {"query": "选课流程", "domain": "academic", "min_score": 0.3, "top_k": 5},
-        ))
+        result = asyncio.run(
+            tm.call(
+                "fake_search",
+                {"query": "选课流程", "domain": "academic", "min_score": 0.3, "top_k": 5},
+            )
+        )
 
     assert result.success
     assert result.reranked is True
@@ -116,11 +121,17 @@ def test_rewrite_failure_degrades_to_original_query():
     tool = _search_tool(use_rewrite=True)
     tm.register(tool)
 
-    with patch.object(
-        tm._client.messages, "create",
-        new=AsyncMock(side_effect=RuntimeError("LLM 不可用")),
-    ), patch.object(
-        tm, "_rerank", new=AsyncMock(side_effect=lambda q, items, k: items[:k]),
+    with (
+        patch.object(
+            tm._client.messages,
+            "create",
+            new=AsyncMock(side_effect=RuntimeError("LLM 不可用")),
+        ),
+        patch.object(
+            tm,
+            "_rerank",
+            new=AsyncMock(side_effect=lambda q, items, k: items[:k]),
+        ),
     ):
         result = asyncio.run(tm.call("fake_search", {"query": "食堂", "top_k": 3}))
 
@@ -134,7 +145,8 @@ def test_rewrite_query_llm_failure_returns_original_query():
     """rewrite_query 自身：LLM 异常时返回 [原始查询]（内部降级）。"""
     tm = MCPToolManager(api_key=FAKE_KEY)
     with patch.object(
-        tm._client.messages, "create",
+        tm._client.messages,
+        "create",
         new=AsyncMock(side_effect=RuntimeError("LLM 不可用")),
     ):
         out = asyncio.run(tm.rewrite_query("食堂几点关门"))
@@ -147,7 +159,8 @@ def test_rerank_llm_failure_returns_original_order():
     tm = MCPToolManager(api_key=FAKE_KEY, rerank_backend="llm")
     items = [{"title": "a"}, {"title": "b"}, {"title": "c"}]
     with patch.object(
-        tm._client.messages, "create",
+        tm._client.messages,
+        "create",
         new=AsyncMock(side_effect=RuntimeError("LLM 不可用")),
     ):
         out = asyncio.run(tm._rerank("q", items, 2))
@@ -156,6 +169,7 @@ def test_rerank_llm_failure_returns_original_order():
 
 
 # ── 重排后端分派（local / llm / off）────────────────────────────────────────
+
 
 def test_rerank_local_backend_uses_local_reranker():
     """local 后端：本地 reranker 可用时走本地重排，不调 LLM。"""
@@ -168,8 +182,10 @@ def test_rerank_local_backend_uses_local_reranker():
             assert min_signal == 0.7  # 高置信门禁：低于该分值的候选不重排
             return expected
 
-    with patch("mcp.embeddings.get_reranker", return_value=_FakeReranker()), \
-            patch.object(tm._client.messages, "create", new=AsyncMock()) as llm:
+    with (
+        patch("mcp.embeddings.get_reranker", return_value=_FakeReranker()),
+        patch.object(tm._client.messages, "create", new=AsyncMock()) as llm,
+    ):
         out = asyncio.run(tm._rerank("q", items, 2))
 
     assert out == expected
@@ -181,9 +197,10 @@ def test_rerank_local_unavailable_falls_back_to_llm():
     tm = MCPToolManager(api_key=FAKE_KEY, rerank_backend="local")
     items = [{"title": "a"}, {"title": "b"}, {"title": "c"}]
 
-    with patch("mcp.embeddings.get_reranker", return_value=None), \
-            patch.object(tm, "_rerank_llm", new=AsyncMock(
-                side_effect=lambda q, items_, k: items_[:k])) as llm:
+    with (
+        patch("mcp.embeddings.get_reranker", return_value=None),
+        patch.object(tm, "_rerank_llm", new=AsyncMock(side_effect=lambda q, items_, k: items_[:k])) as llm,
+    ):
         out = asyncio.run(tm._rerank("q", items, 2))
 
     assert out == [{"title": "a"}, {"title": "b"}]
@@ -194,8 +211,7 @@ def test_rerank_off_returns_original_order():
     """off 后端：不重排，按原顺序截断 Top-K。"""
     tm = MCPToolManager(api_key=FAKE_KEY, rerank_backend="off")
     items = [{"title": "a"}, {"title": "b"}, {"title": "c"}]
-    with patch.object(tm, "_rerank_llm", new=AsyncMock()) as llm, \
-            patch("mcp.embeddings.get_reranker") as gr:
+    with patch.object(tm, "_rerank_llm", new=AsyncMock()) as llm, patch("mcp.embeddings.get_reranker") as gr:
         out = asyncio.run(tm._rerank("q", items, 2))
 
     assert out == [{"title": "a"}, {"title": "b"}]

@@ -15,6 +15,7 @@
   - anydoc 一律显式传 format（扩展名推导）：无 magic bytes 的格式（如 csv）自动
     检测会失败；且格式与内容不符时 anydoc 可能静默产出垃圾，不能依赖它自检
 """
+
 import json
 import logging
 from pathlib import Path
@@ -25,12 +26,27 @@ logger = logging.getLogger(__name__)
 # anydoc 支持扩展名 → 规范格式名（对应 firecrawl-anydoc 0.1.8 的 Format Literal）。
 # 显式传 format 的原因见模块 docstring：不依赖 anydoc 的内容自检。
 _ANYDOC_EXTENSIONS = {
-    ".doc": "doc", ".docx": "docx", ".docm": "docx",
-    ".ppt": "ppt", ".pps": "ppt", ".pot": "ppt",
-    ".pptx": "pptx", ".pptm": "pptx", ".ppsx": "pptx", ".ppsm": "pptx",
-    ".xls": "xlsx", ".xlsx": "xlsx", ".xlsm": "xlsx", ".xlsb": "xlsx",
-    ".odt": "odt", ".ods": "ods", ".odp": "odp",
-    ".rtf": "rtf", ".epub": "epub", ".csv": "csv", ".pdf": "pdf",
+    ".doc": "doc",
+    ".docx": "docx",
+    ".docm": "docx",
+    ".ppt": "ppt",
+    ".pps": "ppt",
+    ".pot": "ppt",
+    ".pptx": "pptx",
+    ".pptm": "pptx",
+    ".ppsx": "pptx",
+    ".ppsm": "pptx",
+    ".xls": "xlsx",
+    ".xlsx": "xlsx",
+    ".xlsm": "xlsx",
+    ".xlsb": "xlsx",
+    ".odt": "odt",
+    ".ods": "ods",
+    ".odp": "odp",
+    ".rtf": "rtf",
+    ".epub": "epub",
+    ".csv": "csv",
+    ".pdf": "pdf",
 }
 
 # 支持的扩展名（上传接口与知识库投放目录共用）
@@ -111,9 +127,7 @@ def _extract_anydoc(data: bytes, fmt: str) -> str:
         return anydoc.to_markdown_bytes(data, format=fmt)
     except anydoc.UnsupportedError as exc:
         if "OCR is required" in str(exc):
-            raise ValueError(
-                "PDF 无文本层（可能是扫描件），暂不支持 OCR，请改用可复制的 PDF 或 txt/md 格式"
-            ) from exc
+            raise ValueError("PDF 无文本层（可能是扫描件），暂不支持 OCR，请改用可复制的 PDF 或 txt/md 格式") from exc
         raise ValueError(f"文件格式无法识别或不受支持: {exc}") from exc
     except anydoc.ConvertError as exc:
         # Malformed/Encrypted/MissingPart/ResourceLimit 均继承 ConvertError

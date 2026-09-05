@@ -1,4 +1,5 @@
 """MCP 协议路由：POST /mcp（Streamable HTTP tools 子集）与 /mcp/info。"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -36,11 +37,14 @@ async def mcp_endpoint(request: Request):
     except UnicodeDecodeError:
         # 非法 UTF-8：返回标准 JSON-RPC PARSE_ERROR（-32700），
         # 而不是静默丢弃字节后让协议层给出通用解析错误。
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "id": None,
-            "error": {"code": -32700, "message": "Parse error: 请求体不是合法 UTF-8"},
-        }, status_code=400)
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Parse error: 请求体不是合法 UTF-8"},
+            },
+            status_code=400,
+        )
     result = await server.handle(raw)
     if result is None:
         return Response(status_code=202)

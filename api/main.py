@@ -12,6 +12,7 @@ memory（个人数据）、knowledge（知识库）、monitor（观测/评测）
 mcp（MCP 协议）、system（健康/Skills/校园公开信息）。
 全局组件与运行时构建统一在 api/state.py，避免多处初始化漂移。
 """
+
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -81,7 +82,7 @@ _RADAR_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 def next_radar_sync_at(now: datetime | None = None) -> datetime:
     """返回下一个北京时间 08:00 的 Campus Radar 同步时刻。"""
-    current = (now.astimezone(_RADAR_TIMEZONE) if now else datetime.now(_RADAR_TIMEZONE))
+    current = now.astimezone(_RADAR_TIMEZONE) if now else datetime.now(_RADAR_TIMEZONE)
     scheduled = current.replace(hour=8, minute=0, second=0, microsecond=0)
     return scheduled if current < scheduled else scheduled + timedelta(days=1)
 
@@ -100,20 +101,63 @@ async def lifespan(app: FastAPI):
     await state._monitor.start()
 
     async def refresh_public_notices() -> None:
-        """启动即同步一次，之后在每天北京时间 08:00 同步公开通知。"""
+        """启动即同步一次；失败按 15min/1h/3h 退避重试，3 次后回退到每日定时。
+
+        一次瞬时网络故障不应让通知停更 24 小时——这是同步链路唯一的数据入口。
+        """
+        retry_delays = (15 * 60, 60 * 60, 3 * 60 * 60)
+        failure_count = 0
         next_run = next_radar_sync_at()
         while True:
             try:
                 result = await state._campus_radar.refresh()
-                logger.info("校园通知雷达同步：检查 %s 条，新增 %s 条", result["checked"], result["new_events"])
+                failure_count = 0
+                logger.info(
+                    "校园通知雷达同步：检查 %s 条，新增 %s 条",
+                    result["checked"],
+                    result["new_events"],
+                )
             except Exception as ex:
-                logger.warning("校园通知雷达同步失败（将在下一次定时任务重试）: %s", ex)
+                failure_count += 1
+                if failure_count <= len(retry_delays):
+                    retry_delay = retry_delays[failure_count - 1]
+                    logger.warning(
+                        "校园通知雷达同步失败（%d 分钟后第 %d 次重试）: %s",
+                        retry_delay // 60,
+                        failure_count,
+                        ex,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                logger.warning(
+                    "校园通知雷达同步连续失败 %d 次（%s），等待下一次定时任务重试",
+                    failure_count,
+                    ex,
+                )
             delay_seconds = max(0.0, (next_run - datetime.now(_RADAR_TIMEZONE)).total_seconds())
             logger.info("校园通知雷达下次定时同步：%s", next_run.isoformat())
             await asyncio.sleep(delay_seconds)
             next_run = next_radar_sync_at()
 
     state._spawn_background(refresh_public_notices())
+
+    async def maintain_memory() -> None:
+        """每日清理分层记忆（L0 原文/工具卸载 refs/失效事实/画像历史版本）。
+
+        LayeredStore.prune 此前只有评测脚本调用，生产库会无限增长。
+        """
+        while True:
+            try:
+                stats = await state._memory.layered_store.prune()
+                logger.info("分层记忆清理完成: %s", stats)
+            except Exception as ex:
+                logger.warning("分层记忆清理失败: %s", ex)
+            await asyncio.sleep(24 * 3600)
+
+    state._spawn_background(maintain_memory())
+
+    if state._semantic_cache is not None:
+        state._spawn_background(state._semantic_cache.purge_expired())
 
     # main 命名空间同步（router 读 state.*，这里保持向后兼容别名）
     _monitor = state._monitor
@@ -155,10 +199,10 @@ if os.getenv("ECHOGUIDE_GUARD_ENABLED", "1") == "1":
 
 # 业务路由（按模块拆分，见 api/routers/）
 for _router in (
-    system_router.router,   # /health /skills /campus
-    chat_router.router,     # /chat /chat/stream /search
-    mcp_router.router,      # /mcp /mcp/info
-    memory_router.router,   # /personal/*
+    system_router.router,  # /health /skills /campus
+    chat_router.router,  # /chat /chat/stream /search
+    mcp_router.router,  # /mcp /mcp/info
+    memory_router.router,  # /personal/*
     knowledge_router.router,  # /knowledge/*
     monitor_router.router,  # /monitor /metrics /traces /eval/run
     product_router.router,  # /personal/today /inbox /student-profile
@@ -198,8 +242,13 @@ async def register(body: AuthCredentials, response: Response):
     except ValueError as ex:
         raise HTTPException(400, str(ex)) from ex
     response.set_cookie(
-        SESSION_COOKIE, create_session_token(user), httponly=True, secure=cookie_secure(),
-        samesite="lax", max_age=7 * 24 * 3600, path="/",
+        SESSION_COOKIE,
+        create_session_token(user),
+        httponly=True,
+        secure=cookie_secure(),
+        samesite="lax",
+        max_age=7 * 24 * 3600,
+        path="/",
     )
     return {"authenticated": True, "user": user.public()}
 
@@ -210,8 +259,13 @@ async def login(body: AuthCredentials, response: Response):
     if user is None:
         raise HTTPException(401, "用户名或密码错误")
     response.set_cookie(
-        SESSION_COOKIE, create_session_token(user), httponly=True, secure=cookie_secure(),
-        samesite="lax", max_age=7 * 24 * 3600, path="/",
+        SESSION_COOKIE,
+        create_session_token(user),
+        httponly=True,
+        secure=cookie_secure(),
+        samesite="lax",
+        max_age=7 * 24 * 3600,
+        path="/",
     )
     return {"authenticated": True, "user": user.public()}
 
@@ -251,7 +305,7 @@ async def _cli():
     state._build_runtime()
     await state._setup_external_mcp()
     orch = state._orchestrator
-    mem  = state._memory
+    mem = state._memory
 
     user_id, conv_id = "cli_user", str(uuid.uuid4())
 
@@ -266,10 +320,11 @@ async def _cli():
             break
 
         ctx = await mem.get_context(user_id, conv_id, query=msg)
-        history = [
-            {"role": m.role.value, "content": m.content}
-            for m in ctx.recent_messages[-5:]
-        ] if ctx.recent_messages else None
+        history = (
+            [{"role": m.role.value, "content": m.content} for m in ctx.recent_messages[-5:]]
+            if ctx.recent_messages
+            else None
+        )
         req = Request(message=msg, user_id=user_id, conv_id=conv_id, context=ctx.to_prompt_text(), history=history)
         result = await orch.run(req)
 

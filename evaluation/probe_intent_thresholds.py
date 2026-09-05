@@ -21,6 +21,7 @@ embed_documents、都不带 bge-zh 指令前缀——指令前缀只用于 RAG �
 Embedding 判据与 core/intent_recognizer.py 完全一致（pattern 有信号时不跳过，
 pattern=OTHER 且追问形态 → 直接 LLM）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -83,9 +84,14 @@ _CASES: List[Tuple[str, Optional[str], str]] = [
 ]
 
 
-def route_for(pat: Tuple[Optional[IntentDomain], float], emb_score: float,
-              emb_margin: float, emb_domain: Optional[IntentDomain],
-              threshold: float, margin: float) -> str:
+def route_for(
+    pat: Tuple[Optional[IntentDomain], float],
+    emb_score: float,
+    emb_margin: float,
+    emb_domain: Optional[IntentDomain],
+    threshold: float,
+    margin: float,
+) -> str:
     """复刻 intent_recognizer 的级联判据（追问跳过另由调用方标注）。
 
     含双确认与分歧仲裁：
@@ -99,8 +105,7 @@ def route_for(pat: Tuple[Optional[IntentDomain], float], emb_score: float,
         if emb_domain == pat[0]:
             return "pattern"
         return "llm⇄"  # 关键词与 Embedding 分歧 → LLM 仲裁
-    if (emb_domain not in (None, IntentDomain.OTHER)
-            and emb_score >= threshold and emb_margin >= margin):
+    if emb_domain not in (None, IntentDomain.OTHER) and emb_score >= threshold and emb_margin >= margin:
         if pat_hit and emb_domain != pat[0]:
             return "llm⇄"  # pattern 弱信号与 Embedding 分歧 → LLM 仲裁
         return "embedding"
@@ -122,27 +127,26 @@ def main() -> int:
     i = 0
     for domain in _DOMAIN_TEMPLATES:
         n = len(_DOMAIN_TEMPLATES[domain])
-        tpl_index[domain] = list(zip(_DOMAIN_TEMPLATES[domain], tpl_vecs[i:i + n], strict=False))
+        tpl_index[domain] = list(zip(_DOMAIN_TEMPLATES[domain], tpl_vecs[i : i + n], strict=False))
         i += n
 
     rows = []  # (msg, expect, note, routes, emb_domain, pat_display)
-    print(f"{'问题':<22}{'期望':<9}{'pattern':<9}{'emb top1':<15}{'margin':<8}"
-          f"{'0.80':<9}{'0.85':<9}  备注")
+    print(f"{'问题':<22}{'期望':<9}{'pattern':<9}{'emb top1':<15}{'margin':<8}{'0.80':<9}{'0.85':<9}  备注")
     print("-" * 100)
     for msg, expect, note in _CASES:
         pat = domain_hit_score(msg)
         pat_display = f"{pat[0].value}@{pat[1]:.2f}" if pat[0] else "-"
 
-        qv = embedder.embed_documents([msg])[0]   # 同构嵌入（与生产一致）
+        qv = embedder.embed_documents([msg])[0]  # 同构嵌入（与生产一致）
         scored = sorted(
             ((max(_cosine(qv, v) for _, v in vecs), d) for d, vecs in tpl_index.items()),
-            key=lambda x: x[0], reverse=True,
+            key=lambda x: x[0],
+            reverse=True,
         )
         emb_score, emb_domain = scored[0]
         emb_margin = max(0.0, scored[0][0] - scored[1][0])
         # 真实级联：追问形态为最高优先级（强信号无条件；弱信号仅当 pattern 无信号）
-        followup_skip = IS_FOLLOWUP_SHAPED(
-            msg, has_pattern_signal=pat[0] not in (None, IntentDomain.OTHER))
+        followup_skip = IS_FOLLOWUP_SHAPED(msg, has_pattern_signal=pat[0] not in (None, IntentDomain.OTHER))
 
         routes = {}
         for name, (thr, mg) in CONFIGS.items():
@@ -156,9 +160,11 @@ def main() -> int:
         rows.append((msg, expect, note, routes, emb_domain, pat_display))
 
         diff = " ←差异" if routes["0.80"].rstrip("✗") != routes["0.85"].rstrip("✗") else ""
-        print(f"{msg:<22}{expect or 'llm':<9}{pat_display:<9}"
-              f"{emb_domain.value}@{scored[0][0]:.3f}{'':<3}{emb_margin:.3f}{'':<5}"
-              f"{routes['0.80']:<9}{routes['0.85']:<9}{note}{' ✂' if followup_skip else ''}{diff}")
+        print(
+            f"{msg:<22}{expect or 'llm':<9}{pat_display:<9}"
+            f"{emb_domain.value}@{scored[0][0]:.3f}{'':<3}{emb_margin:.3f}{'':<5}"
+            f"{routes['0.80']:<9}{routes['0.85']:<9}{note}{' ✂' if followup_skip else ''}{diff}"
+        )
 
     print("-" * 100)
     n_followup = sum(1 for r in rows if r[3]["0.80"].startswith("llm✂"))
@@ -170,11 +176,14 @@ def main() -> int:
         print(f"  {name}: Embedding 命中 {hits} 个，其中误判 {wrong} 个")
 
     # "牺牲品"：非追问句在 0.80 命中、0.85 落 LLM
-    sacrificed = [r[0] for r in rows
-                  if not r[3]["0.85"].startswith("llm✂")
-                  and r[3]["0.80"].startswith("embedding")
-                  and r[3]["0.85"].startswith("llm")]
-    print("\n0.80 命中但 0.85 落入 LLM 的问题（\"牺牲品\"，看是否值得为它们降阈值）:")
+    sacrificed = [
+        r[0]
+        for r in rows
+        if not r[3]["0.85"].startswith("llm✂")
+        and r[3]["0.80"].startswith("embedding")
+        and r[3]["0.85"].startswith("llm")
+    ]
+    print('\n0.80 命中但 0.85 落入 LLM 的问题（"牺牲品"，看是否值得为它们降阈值）:')
     for m in sacrificed:
         print(f"  - {m}")
     print("\n判断口径：牺牲品若多为高价值高频问句 → 选 0.80；若多为模糊/边缘句 →")

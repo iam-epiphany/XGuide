@@ -104,12 +104,21 @@ Compose 会启动 XGuide、Redis、ChromaDB、Prometheus 与 Nginx。查看状�
 
 ### 本地开发
 
-后端和前端分别在两个 PowerShell 终端运行：
+要求 Python 3.12+、Node.js 20+ 和可用的 Redis。首次运行先创建虚拟环境并准备配置：
+
+~~~powershell
+Set-Location 'D:\Agent-Project\XGuide'
+py -3.12 -m venv .venv
+Copy-Item .env.example .env
+# 编辑 .env，至少填写 ANTHROPIC_API_KEY
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+~~~
+
+随后在两个 PowerShell 终端分别运行后端和前端：
 
 ~~~powershell
 # 终端 1：后端
 Set-Location 'D:\Agent-Project\XGuide'
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
 $env:ECHOGUIDE_SERVE_STATIC='0'
 .\.venv\Scripts\python.exe -m api.main
 ~~~
@@ -128,7 +137,7 @@ npm run dev
 docker run -d --name echoguide-redis -p 6379:6379 redis:7-alpine redis-server --requirepass echoguide123
 ~~~
 
-更多环境变量、部署细节和截图复现方式见 [运行说明](docs/architecture.md) 与 [前端说明](frontend/README.md)。
+完整环境变量见 [.env.example](.env.example)，系统设计见 [架构说明](docs/architecture.md)，前端构建、部署与截图命令见 [前端说明](frontend/README.md)。
 
 ## 为什么是 XGuide
 
@@ -150,7 +159,7 @@ docker run -d --name echoguide-redis -p 6379:6379 redis:7-alpine redis-server --
 
 - Fast / Deep 双路径与 Task-scoped Agent。
 - L0–L3 分层记忆，保留原始证据链。
-- Agentic RAG：查询改写、并行召回、重排、句级引用。
+- Agentic RAG：查询改写、并行召回、重排、原子 Claim 级证据校验与引用。
 - Trace、指标、Verifier 与工具读写门禁。
 
 </td>

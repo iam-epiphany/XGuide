@@ -105,7 +105,7 @@ erDiagram
     }
 
     schedule {
-        TEXT user_id FK "用户标识"
+        TEXT user_id "应用层关联 users.id"
         TEXT course "课程名称"
         INTEGER day_of_week "0=周一...6=周日"
         TEXT start_time "开始时间 HH:MM"
@@ -117,14 +117,14 @@ erDiagram
 
     todos {
         INTEGER id PK "AUTOINCREMENT"
-        TEXT user_id FK "用户标识"
+        TEXT user_id "应用层关联 users.id"
         TEXT content "事项内容"
         TEXT kind "todo/ddl/exam"
         TEXT due_at "截止时间 YYYY-MM-DD HH:MM"
         INTEGER done "0=未完成/1=完成"
         TEXT created_at "创建时间"
         TEXT completed_at "完成时间"
-        INTEGER source_event_id FK "来源通知，可为空"
+        INTEGER source_event_id "应用层关联 campus_events.id，可为空"
         TEXT source_url "来源原文 URL"
         TEXT source_deadline "原始截止日期"
         TEXT action_plan_id "同一行动计划标识"
@@ -144,22 +144,34 @@ erDiagram
         INTEGER id PK "事件 ID"
         TEXT fingerprint UK "来源 URL 指纹"
         TEXT title "通知标题"
+        TEXT summary "摘要"
+        TEXT body "清洗后的正文"
+        TEXT source_name "来源名称"
+        TEXT source_category "来源类别"
         TEXT source_url "官方原文 URL"
+        TEXT published_at "发布日期"
         TEXT deadline "原文提取的截止日期"
+        TEXT targets_json "目标人群 JSON 数组"
         TEXT requirements_json "条件 JSON 数组"
         TEXT materials_json "材料 JSON 数组"
         TEXT actions_json "动作 JSON 数组"
+        TEXT location "地点"
+        TEXT event_type "事件类型"
         TEXT content_hash "正文内容哈希"
         TEXT etag "HTTP ETag"
         TEXT last_modified "HTTP Last-Modified"
+        TEXT fetched_at "首次抓取时间"
+        TEXT last_checked_at "最近检查时间"
+        TEXT updated_at "内容更新时间"
     }
 
     campus_inbox {
-        TEXT user_id PK "用户标识（联合主键）"
-        INTEGER event_id PK "事件 ID（联合主键）"
+        TEXT user_id PK "用户标识（联合主键，应用层关联 users.id）"
+        INTEGER event_id PK "事件 ID（联合主键，应用层关联 campus_events.id）"
         INTEGER relevance "相关性分数"
         TEXT reason "推荐原因"
-        TEXT status "new/seen/interested/ignored"
+        TEXT status "new/seen/interested/ignored/deleted"
+        TEXT expires_at "个人 Inbox 投递过期时间"
         TEXT updated_at "更新时间"
     }
 
@@ -168,6 +180,8 @@ erDiagram
         INDEX idx_todos_user
     }
 ```
+
+> 图中的用户、来源事件关系是**应用层逻辑关联**。当前 SQLite DDL 没有声明 `FOREIGN KEY` 约束；数据归属和引用有效性由认证依赖、Service/Store 查询条件与测试共同保证。
 
 ### 表结构详情
 
@@ -239,7 +253,7 @@ erDiagram
 
 `campus_events` 保存从无需登录的官方页面取得的通知、来源链接和可核验的结构化字段。`fingerprint` 保证同一来源链接不会重复写入；`content_hash`、`etag`、`last_modified` 支持增量同步和条件请求。
 
-`campus_inbox` 是用户与公开事件的关联表，联合主键为 `(user_id, event_id)`。它保存当前相关性分数、推荐原因和用户状态；同一公开事件可出现在多个用户的 Inbox 中，状态彼此隔离。
+`campus_inbox` 是用户与公开事件的关联表，联合主键为 `(user_id, event_id)`。它保存当前相关性分数、推荐原因、用户状态和 `expires_at`；同一公开事件可出现在多个用户的 Inbox 中，忽略、删除和默认 48 小时投递期限彼此隔离，均不会删除公共事件。
 
 ---
 
@@ -260,7 +274,7 @@ erDiagram
 
     raw_messages {
         INTEGER id PK "AUTOINCREMENT"
-        TEXT user_id FK "用户标识"
+        TEXT user_id "跨库应用层用户标识"
         TEXT conv_id "会话ID"
         TEXT role "user/assistant/system"
         TEXT content "消息内容"
@@ -271,7 +285,7 @@ erDiagram
 
     facts {
         INTEGER id PK "AUTOINCREMENT"
-        TEXT user_id FK "用户标识"
+        TEXT user_id "跨库应用层用户标识"
         TEXT fact "原子事实文本"
         TEXT category "preference/entity/decision/status"
         TEXT source_conv "来源会话"
@@ -283,7 +297,7 @@ erDiagram
 
     profile_history {
         INTEGER id PK "AUTOINCREMENT"
-        TEXT user_id FK "用户标识"
+        TEXT user_id "跨库应用层用户标识"
         TEXT profile_json "整份画像快照"
         TEXT reason "提炼原因"
         TEXT ts "时间戳"
@@ -291,7 +305,7 @@ erDiagram
 
     refs {
         INTEGER id PK "AUTOINCREMENT"
-        TEXT user_id FK "用户标识"
+        TEXT user_id "跨库应用层用户标识"
         TEXT conv_id "会话ID"
         TEXT tool "工具名称"
         TEXT content "工具完整结果"
@@ -442,10 +456,10 @@ ChromaDB 存储结构化数据的向量化表示，支持语义检索和相似�
             "source_url": "来源URL",
             "updated_at": "更新时间",
             "valid_from": "生效时间",
-            "source_status": "official/unverified/sample/stale"
+            "source_status": "official/unverified/sample/stale",
         },
-        ...
-    ]
+        ...,
+    ],
 }
 ```
 
@@ -466,10 +480,10 @@ ChromaDB 存储结构化数据的向量化表示，支持语义检索和相似�
             "conv_id": "会话ID",
             "layer": "scenario",
             "ts": "时间戳",
-            "kind": "task/conclusion/entity"
+            "kind": "task/conclusion/entity",
         },
-        ...
-    ]
+        ...,
+    ],
 }
 ```
 
@@ -484,15 +498,7 @@ ChromaDB 存储结构化数据的向量化表示，支持语义检索和相似�
 {
     "ids": ["profile_user1_v3", ...],
     "documents": ["画像JSON字符串...", ...],
-    "metadatas": [
-        {
-            "user_id": "用户标识",
-            "version": "版本号",
-            "layer": "profile",
-            "ts": "时间戳"
-        },
-        ...
-    ]
+    "metadatas": [{"user_id": "用户标识", "version": "版本号", "layer": "profile", "ts": "时间戳"}, ...],
 }
 ```
 

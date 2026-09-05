@@ -6,6 +6,7 @@ PDF/DOCX/CSV 测试文件在测试内动态生成（reportlab 写 PDF、python-d
 PDF 用英文文本：anydoc 的 PDF 引擎对合成 PDF 的中文 CID 字体提取不可靠
 （真实中文 PDF 的提取质量已由 学习文档/ 目录实测验证），单元测试只验证解析机制。
 """
+
 from __future__ import annotations
 
 import io
@@ -19,6 +20,7 @@ from mcp.document_parser import (
 )
 
 # ── 测试内生成 PDF/DOCX 的辅助 ─────────────────────────────────────────────
+
 
 def make_pdf(pages_text: list[str]) -> bytes:
     """用 reportlab 生成含文本页的 PDF（Helvetica，ASCII 文本，可被 anydoc 提取）。"""
@@ -53,6 +55,7 @@ def make_docx(paragraphs: list[str], table_rows: list[list[str]] | None = None) 
 
 # ── txt / md ────────────────────────────────────────────────────────────────
 
+
 def test_txt_whole_file_as_one_doc():
     docs = parse_document("新生指南.txt", "欢迎来到西电。".encode())
     assert len(docs) == 1
@@ -75,12 +78,13 @@ def test_txt_empty_raises():
 
 # ── json / jsonl ────────────────────────────────────────────────────────────
 
+
 def test_json_array_docs():
     data = '[{"title": "校历", "content": "秋季学期开学。"}, {"title": "选课", "content": "分预选正选。"}]'.encode()
     docs = parse_document("知识.json", data)
     assert len(docs) == 2
     assert docs[0]["title"] == "校历"
-    assert docs[0]["format"] == "json"          # 自动补 format
+    assert docs[0]["format"] == "json"  # 自动补 format
     assert docs[1]["content"] == "分预选正选。"
 
 
@@ -102,19 +106,16 @@ def test_json_broken_raises():
 
 
 def test_jsonl_line_docs():
-    data = ('{"title": "校历", "content": "秋季学期开学。"}\n'
-            '{"title": "选课", "content": "分预选正选。"}\n').encode()
+    data = ('{"title": "校历", "content": "秋季学期开学。"}\n{"title": "选课", "content": "分预选正选。"}\n').encode()
     docs = parse_document("知识.jsonl", data)
     assert len(docs) == 2
     assert docs[0]["title"] == "校历"
-    assert docs[0]["format"] == "jsonl"         # 自动补 format
+    assert docs[0]["format"] == "jsonl"  # 自动补 format
     assert docs[1]["content"] == "分预选正选。"
 
 
 def test_jsonl_skips_blank_lines():
-    data = (b'{"title": "A", "content": "x"}\n'
-            b'\n'
-            b'{"title": "B", "content": "y"}\n')
+    data = b'{"title": "A", "content": "x"}\n\n{"title": "B", "content": "y"}\n'
     docs = parse_document("清单.jsonl", data)
     assert [d["title"] for d in docs] == ["A", "B"]
 
@@ -131,6 +132,7 @@ def test_jsonl_non_object_line_raises():
 
 # ── pdf（anydoc）────────────────────────────────────────────────────────────
 
+
 def test_pdf_multi_page_extracts_text():
     pdf = make_pdf(["Page one text. ", "Page two text. "])
     docs = parse_document("政策文件.pdf", pdf)
@@ -146,7 +148,7 @@ def test_pdf_multi_page_extracts_text():
 
 def test_pdf_scanned_no_text_layer_raises():
     pdf = make_pdf([" "])  # 空白页 ≈ 扫描件无文本层
-    with pytest.raises(ValueError, match="扫描件|无文本层"):
+    with pytest.raises(ValueError, match=r"扫描件|无文本层"):
         parse_document("扫描件.pdf", pdf)
 
 
@@ -156,6 +158,7 @@ def test_pdf_corrupt_raises():
 
 
 # ── docx / csv（anydoc）─────────────────────────────────────────────────────
+
 
 def test_docx_paragraphs_and_tables_in_order():
     docx = make_docx(
@@ -167,7 +170,7 @@ def test_docx_paragraphs_and_tables_in_order():
     text = docs[0]["content"]
     assert "第一条说明。" in text
     assert "第二条说明。" in text
-    assert "| 日期 | 事项 |" in text            # anydoc 输出 GFM 表格，结构不丢
+    assert "| 日期 | 事项 |" in text  # anydoc 输出 GFM 表格，结构不丢
     assert "| 9月1日 | 开学 |" in text
     assert docs[0]["format"] == "docx"
 
@@ -197,6 +200,7 @@ def test_legacy_office_extensions_accepted():
 
 # ── 其他 ────────────────────────────────────────────────────────────────────
 
+
 def test_unsupported_extension_raises():
     with pytest.raises(ValueError, match="不支持的文件格式"):
         parse_document("图片.png", b"whatever")
@@ -209,9 +213,27 @@ def test_no_extension_raises():
 
 def test_supported_extensions():
     assert SUPPORTED_EXTENSIONS == {
-        ".txt", ".md", ".json", ".jsonl",
+        ".txt",
+        ".md",
+        ".json",
+        ".jsonl",
     } | set(_ANYDOC_EXTENSIONS)
     # anydoc 声称覆盖的格式全部在支持列表内
-    for ext in (".doc", ".docx", ".docm", ".ppt", ".pptx", ".xls", ".xlsx",
-                ".xlsb", ".odt", ".ods", ".odp", ".rtf", ".epub", ".csv", ".pdf"):
+    for ext in (
+        ".doc",
+        ".docx",
+        ".docm",
+        ".ppt",
+        ".pptx",
+        ".xls",
+        ".xlsx",
+        ".xlsb",
+        ".odt",
+        ".ods",
+        ".odp",
+        ".rtf",
+        ".epub",
+        ".csv",
+        ".pdf",
+    ):
         assert ext in SUPPORTED_EXTENSIONS

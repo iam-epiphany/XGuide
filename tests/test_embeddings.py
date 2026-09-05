@@ -13,6 +13,7 @@
   5. 模型文件不可用 → 抛错（_ensure_model），单例冷却期内不重试；
   6. 空输入安全返回。
 """
+
 from __future__ import annotations
 
 import threading
@@ -33,6 +34,7 @@ from mcp.embeddings import (
 )
 
 # ── 最小替身（结构对齐 tokenizers / onnxruntime）─────────────────────────────
+
 
 class _FakeEnc:
     def __init__(self, ids, mask, type_ids):
@@ -76,8 +78,7 @@ class _FakeSession:
     def __init__(self, hidden_dim=4, logits=False):
         self.hidden_dim = hidden_dim
         self.logits = logits  # True=输出 [batch,1] logits（reranker 形状）
-        self.inputs = [type("_In", (), {"name": n})() for n in
-                       ("input_ids", "attention_mask", "token_type_ids")]
+        self.inputs = [type("_In", (), {"name": n})() for n in ("input_ids", "attention_mask", "token_type_ids")]
 
     def get_inputs(self):
         return self.inputs
@@ -104,6 +105,7 @@ def _attach_fakes(model, hidden_dim=4, logits=False):
 
 # ── 1. pooling 数学 ──────────────────────────────────────────────────────────
 
+
 def test_mean_pooling_and_l2_normalization():
     """mean pooling（attention_mask 加权）后向量 L2 范数为 1（cosine 空间）。"""
     emb = _attach_fakes(LocalEmbedder())
@@ -125,6 +127,7 @@ def test_pooling_ignores_padding_tokens():
 
 
 # ── 2. bge-zh 指令前缀 ──────────────────────────────────────────────────────
+
 
 def test_instruction_prefix_only_on_query_side():
     """embed_query 加指令前缀；embed_documents 不加（BAAI 要求 query-only）。"""
@@ -176,6 +179,7 @@ def test_call_prefix_mode_both():
 
 # ── 3. reranker ──────────────────────────────────────────────────────────────
 
+
 def test_reranker_sigmoid_scores_in_unit_range():
     """logit → sigmoid 分数 ∈ [0,1]（可解释为相关概率）。"""
     rr = _attach_fakes(LocalReranker(), logits=True)
@@ -196,6 +200,7 @@ def test_reranker_rerank_topk_preserves_items():
 
 
 # ── 4. 降级路径 ──────────────────────────────────────────────────────────────
+
 
 def test_ensure_model_raises_when_all_files_unavailable():
     """模型文件全部下载失败 → 抛错（调用方降级，不静默返回坏模型）。"""
@@ -246,9 +251,7 @@ def test_get_singleton_thread_safe():
         return _attach_fakes(LocalEmbedder())
 
     results = []
-    threads = [threading.Thread(
-        target=lambda: results.append(_get_singleton(holder, factory)))
-        for _ in range(8)]
+    threads = [threading.Thread(target=lambda: results.append(_get_singleton(holder, factory))) for _ in range(8)]
     for t in threads:
         t.start()
     for t in threads:

@@ -40,6 +40,7 @@ Entailment Judge：只处理模糊区间 Claim，一次回答中的多个模糊 
 evidence_ids 必须落在真实证据范围内。开关：
 ECHOGUIDE_GROUNDING_ENTAILMENT=1（默认关闭，避免无配置时引入额外 LLM 成本）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,15 +56,15 @@ logger = logging.getLogger(__name__)
 
 # ── 可标定常量（evaluation/grounding_eval.py --grid --apply 可回写）───────────
 
-MIN_DICE = 0.16            # 高置信直接支持：词面（Dice）
-MIN_COS = 0.52             # 高置信直接支持：语义（bge 余弦）
-FUZZY_MIN_DICE = 0.10      # 模糊带下界：低于此直接 insufficient
-FUZZY_MIN_COS = 0.40       # 模糊带下界：低于此直接 insufficient
-CANDIDATE_TOP_K = 3        # 匹配后保留的候选 Evidence 数（通常 3~5 条全保留）
+MIN_DICE = 0.16  # 高置信直接支持：词面（Dice）
+MIN_COS = 0.52  # 高置信直接支持：语义（bge 余弦）
+FUZZY_MIN_DICE = 0.10  # 模糊带下界：低于此直接 insufficient
+FUZZY_MIN_COS = 0.40  # 模糊带下界：低于此直接 insufficient
+CANDIDATE_TOP_K = 3  # 匹配后保留的候选 Evidence 数（通常 3~5 条全保留）
 COMBINE_WEIGHT_DICE = 0.5  # 组合分权重（Dice）
-COMBINE_WEIGHT_COS = 0.5   # 组合分权重（cosine）
-TIE_EPS = 0.03             # Top-2 组合分差小于此值 → 多候选冲突，走 Judge
-MAX_JUDGE_CLAIMS = 8       # 单次 Judge 请求的 Claim 批量上限
+COMBINE_WEIGHT_COS = 0.5  # 组合分权重（cosine）
+TIE_EPS = 0.03  # Top-2 组合分差小于此值 → 多候选冲突，走 Judge
+MAX_JUDGE_CLAIMS = 8  # 单次 Judge 请求的 Claim 批量上限
 _POLICY_RISK_RE = re.compile(r"政策|规定|资格|条件|限制|截止|必须|要求|流程|办法|标准|条款")
 
 
@@ -182,7 +183,7 @@ def is_factual_claim(claim: str) -> bool:
 
 def _bigrams(s: str) -> set:
     s = re.sub(r"[\s，。！？、,.!?：:；;\"'“”‘’（）()\[\]【】*#\-]", "", s)
-    return {s[i:i + 2] for i in range(len(s) - 1)} if len(s) > 1 else {s}
+    return {s[i : i + 2] for i in range(len(s) - 1)} if len(s) > 1 else {s}
 
 
 def dice_coef(a: str, b: str) -> float:
@@ -226,7 +227,8 @@ async def _batch_cosines(claim: str, evidences: List[Dict[str, Any]]) -> List[fl
 
 
 async def _batch_cosines_multi(
-    claims: List[str], evidences: List[Dict[str, Any]],
+    claims: List[str],
+    evidences: List[Dict[str, Any]],
 ) -> Optional[Dict[str, List[float]]]:
     """一次 batch 嵌入计算全部 claim × evidence 余弦（避免每对单独推理）。
 
@@ -241,9 +243,7 @@ async def _batch_cosines_multi(
         embedder = get_embedder()
         if embedder is None:
             return None
-        texts = [c[:500] for c in claims] + [
-            str(ev.get("content") or "")[:500] for ev in evidences
-        ]
+        texts = [c[:500] for c in claims] + [str(ev.get("content") or "")[:500] for ev in evidences]
         vecs = await asyncio.to_thread(embedder.embed_documents, texts)
         n = len(claims)
         claim_vecs, ev_vecs = vecs[:n], vecs[n:]
@@ -318,8 +318,7 @@ _WEEKDAY_WORD = r"(?:周|星期|礼拜)([一二三四五六日天])"
 _WEEKDAY_RANGE_RE = re.compile(rf"{_WEEKDAY_WORD}\s*(?:至|到|—|－|~|～)\s*{_WEEKDAY_WORD}")
 _WEEKDAY_SINGLE_RE = re.compile(_WEEKDAY_WORD)
 
-_CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
-              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _CN_UNIT_VALUES = {"十": 10, "百": 100, "千": 1000}
 
 
@@ -398,8 +397,16 @@ def _extract_entities(text: str) -> Dict[str, Any]:
     interval 为 "5月1日至5月3日" / "9:00-17:00" 这类区间（先于单点消费）。
     """
     empty: Dict[str, List[Any]] = {
-        "money": [], "percent": [], "num": [], "year": [], "month": [],
-        "day": [], "date": [], "time": [], "weekday": [], "period": [],
+        "money": [],
+        "percent": [],
+        "num": [],
+        "year": [],
+        "month": [],
+        "day": [],
+        "date": [],
+        "time": [],
+        "weekday": [],
+        "period": [],
     }
     text = text or ""
     if not text.strip():
@@ -469,10 +476,7 @@ def _extract_entities(text: str) -> Dict[str, Any]:
     # 下午/晚上/傍晚的 12h 制时间 → 24h（"下午 3:00" == "15:00"）
     if any(p in text for p in ("下午", "晚上", "傍晚")):
         entities["time"] = [round(t + 12, 2) if t < 12 else t for t in entities["time"]]
-    rounded = {
-        k: list(values) if k == "period" else [round(v, 2) for v in values]
-        for k, values in entities.items()
-    }
+    rounded = {k: list(values) if k == "period" else [round(v, 2) for v in values] for k, values in entities.items()}
     return rounded | {"interval": intervals}
 
 
@@ -487,7 +491,10 @@ def _covered(v: float, points: List[float], ranges: List[Tuple[float, float]]) -
 
 
 def _interval_covered(
-    a: float, b: float, points: List[float], ranges: List[Tuple[float, float]],
+    a: float,
+    b: float,
+    points: List[float],
+    ranges: List[Tuple[float, float]],
 ) -> bool:
     """Claim 区间被证据覆盖：与某证据区间完全相等，或严格包含于其内部。
 
@@ -496,9 +503,7 @@ def _interval_covered(
     """
     if _eq(a, b):
         return _covered(a, points, ranges)
-    return any(
-        (_eq(a, s) and _eq(b, e)) or (s < a and b < e) for s, e in ranges
-    )
+    return any((_eq(a, s) and _eq(b, e)) or (s < a and b < e) for s, e in ranges)
 
 
 # 否定前缀与极性动词组：claim 与 evidence 对同一动词（或反义词）极性相反
@@ -521,8 +526,15 @@ _POLARITY_GROUPS: List[Tuple[str, Tuple[str, ...], Tuple[str, ...]]] = [
     ("携带", ("携带",), ()),
     ("预约", ("预约",), ()),
 ]
-_UNIT_LABELS = {"money": "金额", "percent": "百分比", "year": "年份", "month": "月份",
-                "day": "日号", "weekday": "星期", "period": "时段"}
+_UNIT_LABELS = {
+    "money": "金额",
+    "percent": "百分比",
+    "year": "年份",
+    "month": "月份",
+    "day": "日号",
+    "weekday": "星期",
+    "period": "时段",
+}
 
 
 def _polarity_mentions(text: str) -> List[Dict[str, Any]]:
@@ -542,26 +554,34 @@ def _polarity_mentions(text: str) -> List[Dict[str, Any]]:
         for group, pos_verbs, neg_verbs in _POLARITY_GROUPS:
             for v in pos_verbs:
                 for m in re.finditer(re.escape(v), clause):
-                    negated = _NEG_PREFIX_AT_END.search(clause[:m.start()]) is not None
-                    mentions.append({
-                        "group": group, "polarity": -1 if negated else 1, "scope": scope,
-                    })
+                    negated = _NEG_PREFIX_AT_END.search(clause[: m.start()]) is not None
+                    mentions.append(
+                        {
+                            "group": group,
+                            "polarity": -1 if negated else 1,
+                            "scope": scope,
+                        }
+                    )
             for v in neg_verbs:
                 if re.search(re.escape(v), clause):
-                    mentions.append({
-                        "group": group, "polarity": -1, "scope": scope,
-                    })
+                    mentions.append(
+                        {
+                            "group": group,
+                            "polarity": -1,
+                            "scope": scope,
+                        }
+                    )
     return mentions
 
 
 def _scope_overlap(a: Dict[str, Any], b: Dict[str, Any]) -> str:
     """两提及作用域关系（a = claim 侧，b = evidence 侧），三态：
 
-      - "overlap"：双方未限定该维，或双方都限定且相交，或 claim 限定而
-        evidence 未限定（"周日开放" 被笼统的 "不开放" 直接否定 → 硬冲突）；
-      - "soft"：claim 未限定该维而 evidence 限定了（"图书馆开放" 是笼统
-        陈述，evidence "周末休息" 不构成直接矛盾，但需要 Judge 复核）；
-      - "disjoint"：双方都限定且不相交（周六 vs 周日是不同事实，不冲突）。
+    - "overlap"：双方未限定该维，或双方都限定且相交，或 claim 限定而
+      evidence 未限定（"周日开放" 被笼统的 "不开放" 直接否定 → 硬冲突）；
+    - "soft"：claim 未限定该维而 evidence 限定了（"图书馆开放" 是笼统
+      陈述，evidence "周末休息" 不构成直接矛盾，但需要 Judge 复核）；
+    - "disjoint"：双方都限定且不相交（周六 vs 周日是不同事实，不冲突）。
     """
     soft = False
     for key in ("weekdays", "periods"):
@@ -597,10 +617,10 @@ def _scope_overlap(a: Dict[str, Any], b: Dict[str, Any]) -> str:
 def _polarity_conflict(claim: str, evidence: str) -> Tuple[str, Optional[str]]:
     """否定/反义极性检查，返回 (level, reason)：
 
-      - "hard"：作用域重叠（或双方未限定）的相反表述 → 直接拦截；
-      - "soft"：claim 未限定作用域而 evidence 限定否定（"图书馆开放" vs
-        "周末休息"）→ 不直接拦截，但标记为需要 Judge 复核；
-      - "none"：作用域不相交（不同事实）或无共同动词。
+    - "hard"：作用域重叠（或双方未限定）的相反表述 → 直接拦截；
+    - "soft"：claim 未限定作用域而 evidence 限定否定（"图书馆开放" vs
+      "周末休息"）→ 不直接拦截，但标记为需要 Judge 复核；
+    - "none"：作用域不相交（不同事实）或无共同动词。
     """
     cm, em = _polarity_mentions(claim), _polarity_mentions(evidence)
     saw_soft = False
@@ -661,8 +681,7 @@ def check_hard_consistency(claim: str, evidence: str) -> Dict[str, Any]:
             continue
         points, ranges = ee[unit], ee["interval"][rkey]
         missing = [v for v in ce[unit] if not _covered(v, points, ranges)]
-        not_covered_iv = [iv for iv in ce["interval"][rkey]
-                          if not _interval_covered(iv[0], iv[1], points, ranges)]
+        not_covered_iv = [iv for iv in ce["interval"][rkey] if not _interval_covered(iv[0], iv[1], points, ranges)]
         if missing or not_covered_iv:
             label = "日期" if unit == "date" else "时间"
             hard_reasons.append(f"[{unit}] {label}不一致：claim 超出 evidence 覆盖范围")
@@ -674,8 +693,7 @@ def check_hard_consistency(claim: str, evidence: str) -> Dict[str, Any]:
         soft_reasons.append(pol_reason)
 
     level = "hard" if hard_reasons else ("soft" if soft_reasons else "none")
-    return {"conflict": level == "hard", "level": level,
-            "reasons": hard_reasons + soft_reasons}
+    return {"conflict": level == "hard", "level": level, "reasons": hard_reasons + soft_reasons}
 
 
 # ── 全证据候选匹配（P0-1）────────────────────────────────────────────────────
@@ -708,14 +726,16 @@ async def match_evidence_candidates(
         content = str(ev.get("content") or "")
         dice = dice_coef(claim, content)
         cos = cos_scores[i] if i < len(cos_scores) else 0.0
-        cands.append({
-            "evidence_idx": i,
-            "title": str(ev.get("title") or ""),
-            "dice": round(dice, 4),
-            "cos": round(cos, 4),
-            "combined": round(combined_score(dice, cos), 4),
-            "guard": check_hard_consistency(claim, content),
-        })
+        cands.append(
+            {
+                "evidence_idx": i,
+                "title": str(ev.get("title") or ""),
+                "dice": round(dice, 4),
+                "cos": round(cos, 4),
+                "combined": round(combined_score(dice, cos), 4),
+                "guard": check_hard_consistency(claim, content),
+            }
+        )
     cands.sort(key=lambda c: (c["combined"], c["dice"], -c["evidence_idx"]), reverse=True)
     return cands[: max(1, top_k)]
 
@@ -785,7 +805,8 @@ def _skip_record(claim: str) -> Dict[str, Any]:
 
 
 def _decide_from_candidates(
-    claim: str, candidates: List[Dict[str, Any]],
+    claim: str,
+    candidates: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """候选 → 决策记录：Guard 过滤 → 高置信直接判定 / 软信号复核 / needs_judge。
 
@@ -807,13 +828,15 @@ def _decide_from_candidates(
             rec["decision_source"] = "hard_guard"
         return rec
     best = active[0]
-    rec.update({
-        "selected_evidence_idx": best["evidence_idx"],
-        "selected_title": best["title"],
-        "best_dice": best["dice"],
-        "best_cos": best["cos"],
-        "hard_guard": best["guard"],
-    })
+    rec.update(
+        {
+            "selected_evidence_idx": best["evidence_idx"],
+            "selected_title": best["title"],
+            "best_dice": best["dice"],
+            "best_cos": best["cos"],
+            "hard_guard": best["guard"],
+        }
+    )
     verdict = decide_by_scores(best, active, claim)
     if verdict == "supported":
         if best["guard"]["level"] == "soft":
@@ -831,7 +854,8 @@ def _decide_from_candidates(
 
 
 def _apply_judge(
-    record: Dict[str, Any], verdict_info: Optional[Dict[str, Any]],
+    record: Dict[str, Any],
+    verdict_info: Optional[Dict[str, Any]],
     evidences: List[Dict[str, Any]],
 ) -> None:
     """把 Judge 结果落到记录上。verdict 缺失/非法 → insufficient 兜底
@@ -843,8 +867,11 @@ def _apply_judge(
         return
     verdict = str(verdict_info.get("verdict", "")).strip().lower()
     ids = verdict_info.get("evidence_ids") or []
-    valid = [int(i) for i in ids if isinstance(i, int | float | str)
-             and str(i).lstrip("-").isdigit() and 1 <= int(i) <= len(evidences)]
+    valid = [
+        int(i)
+        for i in ids
+        if isinstance(i, int | float | str) and str(i).lstrip("-").isdigit() and 1 <= int(i) <= len(evidences)
+    ]
     if verdict == "supported" and valid:
         idx = valid[0] - 1
         record["status"] = "supported"
@@ -897,8 +924,7 @@ class LLMEntailmentJudge:
     绝不因 Judge 故障产生 Citation）。
     """
 
-    def __init__(self, client: Any = None, model: str = "", gateway: Any = None,
-                 enabled: Optional[bool] = None):
+    def __init__(self, client: Any = None, model: str = "", gateway: Any = None, enabled: Optional[bool] = None):
         self._client = client
         self._model = model
         self._gateway = gateway
@@ -909,7 +935,7 @@ class LLMEntailmentJudge:
             return {}
         results: Dict[str, Dict[str, Any]] = {}
         for i in range(0, len(claims), MAX_JUDGE_CLAIMS):
-            chunk = claims[i:i + MAX_JUDGE_CLAIMS]
+            chunk = claims[i : i + MAX_JUDGE_CLAIMS]
             try:
                 results.update(await self._judge_chunk(chunk, evidences))
             except Exception as ex:
@@ -917,11 +943,12 @@ class LLMEntailmentJudge:
         return results
 
     async def _judge_chunk(
-        self, claims: List[str], evidences: List[Dict[str, Any]],
+        self,
+        claims: List[str],
+        evidences: List[Dict[str, Any]],
     ) -> Dict[str, Dict[str, Any]]:
         evidence_lines = "\n".join(
-            f"{i + 1}. {ev.get('title', '')!s}：{str(ev.get('content', ''))[:400]}"
-            for i, ev in enumerate(evidences)
+            f"{i + 1}. {ev.get('title', '')!s}：{str(ev.get('content', ''))[:400]}" for i, ev in enumerate(evidences)
         )[:4000]
         claim_lines = "\n".join(f"- {c}" for c in claims)
         system = (
@@ -958,9 +985,7 @@ class LLMEntailmentJudge:
                             system=system,
                             messages=[{"role": "user", "content": user}],
                         )
-                    text = "".join(
-                        b.text for b in resp.content if getattr(b, "type", "") == "text"
-                    ).strip().strip("`")
+                    text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip().strip("`")
                     if text.startswith("json"):
                         text = text[4:]
                     data = json.loads(text)
@@ -977,8 +1002,11 @@ class LLMEntailmentJudge:
                 verdict = str(d.get("verdict", "")).strip().lower()
                 if claim not in known or verdict not in ("supported", "contradicted", "insufficient"):
                     continue
-                ids = [int(x) for x in (d.get("evidence_ids") or [])
-                       if str(x).lstrip("-").isdigit() and 1 <= int(x) <= len(evidences)]
+                ids = [
+                    int(x)
+                    for x in (d.get("evidence_ids") or [])
+                    if str(x).lstrip("-").isdigit() and 1 <= int(x) <= len(evidences)
+                ]
                 out[claim] = {"verdict": verdict, "evidence_ids": ids}
             if s is not None:  # 观测：原始输出截断进 trace，供离线评估 Judge 输出质量
                 s.meta["ok"] = "1" if out else "0"
@@ -987,6 +1015,7 @@ class LLMEntailmentJudge:
 
 
 # ── 引用标注（执行层后置生成）────────────────────────────────────────────────
+
 
 def _strip_markdown_links(text: str) -> str:
     """剔除 [text](url) 形式的 Markdown 链接（其 [n] 是链接标签不是引用）。"""
@@ -1008,9 +1037,11 @@ def strip_citation_markers(answer: str) -> str:
     text = answer or ""
     # 先保护 Markdown 链接（占位符替换），再删独立 [n]
     links: List[str] = []
+
     def _save(m: re.Match) -> str:
         links.append(m.group(0))
         return f"\x00{len(links) - 1}\x00"
+
     text = re.sub(r"\[[^\]]*\]\([^)]*\)", _save, text)
     text = re.sub(r"\[\d+\]", "", text)
     for i, link in enumerate(links):
@@ -1038,8 +1069,13 @@ async def annotate_citations(
     claims 为逐 Claim 的完整决策记录（Trace / 错误分析用）。
     """
     if not evidences:
-        return {"text": answer or "", "sentences": [], "citation_indices": [],
-                "unsupported_sentences": [], "claims": []}
+        return {
+            "text": answer or "",
+            "sentences": [],
+            "citation_indices": [],
+            "unsupported_sentences": [],
+            "claims": [],
+        }
 
     body = strip_citation_markers(answer or "")
     parts = split_sentences_raw(body)
@@ -1101,8 +1137,8 @@ async def annotate_citations(
         if not clauses:
             out_parts.append(part)
             continue
-        leading = part[:len(part) - len(part.lstrip())]
-        tail = part[len(part.rstrip()):]
+        leading = part[: len(part) - len(part.lstrip())]
+        tail = part[len(part.rstrip()) :]
         body_parts: List[str] = []
         for c, sep in clauses:
             rec = records[rec_pos]
@@ -1110,17 +1146,19 @@ async def annotate_citations(
             mark = ""
             if rec is not None and rec["status"] == "supported" and rec["citation"]:
                 mark = f"[{rec['citation']}]"
-                cited_sents.append({
-                    "sentence": c.strip(),
-                    "evidence_idx": rec["selected_evidence_idx"],
-                    "dice": rec["best_dice"],
-                    "cos": rec["best_cos"],
-                })
+                cited_sents.append(
+                    {
+                        "sentence": c.strip(),
+                        "evidence_idx": rec["selected_evidence_idx"],
+                        "dice": rec["best_dice"],
+                        "cos": rec["best_cos"],
+                    }
+                )
                 indices.add(rec["citation"])
             elif rec is not None and rec["status"] in ("insufficient", "contradicted"):
                 unsupported.append(rec["claim"])
             # 标注插在 Claim 行尾空白之前（与句级标注同一风格）
-            body_parts.append(f"{c.rstrip()}{mark}{c[len(c.rstrip()):]}{sep}")
+            body_parts.append(f"{c.rstrip()}{mark}{c[len(c.rstrip()) :]}{sep}")
         out_parts.append(leading + "".join(body_parts) + tail)
     annotated = "".join(out_parts)
 
@@ -1148,18 +1186,26 @@ async def grounding_trace(
     定位是 Claim 拆分、Evidence 匹配、Hard Guard 还是 Entailment 判断出错。
     """
     if not evidences:
-        return {"sentence_count": 0, "claim_count": 0, "supported_count": 0,
-                "supported_ratio": 0.0, "sentences": [], "claims": []}
+        return {
+            "sentence_count": 0,
+            "claim_count": 0,
+            "supported_count": 0,
+            "supported_ratio": 0.0,
+            "sentences": [],
+            "claims": [],
+        }
     parts = split_sentences_raw(answer or "")
     per_sentence = []
     factual_claims: List[str] = []
     for part in parts:
         sent = part.strip()
         clauses = split_claims(sent) if sent else []
-        per_sentence.append({
-            "sentence": sent,
-            "claims": [c.strip() for c, _ in clauses if c.strip()],
-        })
+        per_sentence.append(
+            {
+                "sentence": sent,
+                "claims": [c.strip() for c, _ in clauses if c.strip()],
+            }
+        )
         for c, _sep in clauses:
             c = c.strip()
             if c and is_factual_claim(c):

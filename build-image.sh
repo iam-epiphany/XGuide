@@ -42,12 +42,11 @@ EchoGuide Docker 镜像构建工具
 用法: ./build-image.sh [命令] [选项]
 
 命令:
-    build           构建默认镜像
+    build           构建默认镜像（全部阶段，含生产目标）
     build-prod      构建生产镜像
     build-dev       构建开发镜像
-    build-test      构建测试镜像
     push            推送镜像到仓库
-    tag             为镜像添加标签
+    tag             为 latest 镜像添加版本标签
     clean           清理构建缓存
     help            显示此帮助
 
@@ -75,44 +74,40 @@ build_image() {
 
     print_step "开始构建镜像: ${IMAGE_NAME}:${VERSION}"
 
-    # 构建参数
-    build_cmd="docker build"
+    # 构建参数（数组传参，避免空格参数被 eval 拆碎）
+    local build_cmd=(docker build)
 
     # 添加目标
     if [ -n "$target" ]; then
-        build_cmd="$build_cmd --target $target"
+        build_cmd+=(--target "$target")
     fi
 
     # 添加缓存选项
     if [ "$no_cache" = "true" ]; then
-        build_cmd="$build_cmd --no-cache"
+        build_cmd+=(--no-cache)
         print_warn "禁用构建缓存"
     fi
 
     # 添加多平台支持
     if [ -n "$platforms" ]; then
-        build_cmd="$build_cmd --platform $platforms"
+        build_cmd+=(--platform "$platforms")
         print_info "构建平台: $platforms"
     fi
 
     # 添加构建参数
     if [ -n "$BUILD_ARGS" ]; then
-        build_cmd="$build_cmd $BUILD_ARGS"
+        # shellcheck disable=SC2206  # BUILD_ARGS 允许用户传多个 key=value
+        build_cmd+=($BUILD_ARGS)
     fi
 
     # 执行构建
-    full_tag="${REGISTRY}${IMAGE_NAME}:${VERSION}"
-    build_cmd="$build_cmd -t $full_tag -t ${REGISTRY}${IMAGE_NAME}:latest ."
+    local full_tag="${REGISTRY}${IMAGE_NAME}:${VERSION}"
+    build_cmd+=(-t "$full_tag" -t "${REGISTRY}${IMAGE_NAME}:latest" .)
 
-    print_info "执行命令: $build_cmd"
-    eval $build_cmd
+    print_info "执行命令: ${build_cmd[*]}"
+    "${build_cmd[@]}"
 
-    if [ $? -eq 0 ]; then
-        print_info "✓ 镜像构建成功: $full_tag"
-    else
-        print_error "✗ 镜像构建失败"
-        exit 1
-    fi
+    print_info "✓ 镜像构建成功: $full_tag"
 }
 
 # 推送镜像
@@ -138,9 +133,14 @@ push_image() {
 tag_image() {
     local new_version=$1
 
-    print_step "为镜像添加标签: $new_version"
+    if [ -z "$new_version" ]; then
+        print_error "缺少目标标签：./build-image.sh tag --version v1.0.0"
+        exit 1
+    fi
 
-    docker tag ${REGISTRY}${IMAGE_NAME}:${VERSION} ${REGISTRY}${IMAGE_NAME}:${new_version}
+    print_step "为镜像添加标签: ${REGISTRY}${IMAGE_NAME}:latest → ${REGISTRY}${IMAGE_NAME}:${new_version}"
+
+    docker tag "${REGISTRY}${IMAGE_NAME}:latest" "${REGISTRY}${IMAGE_NAME}:${new_version}"
 
     print_info "✓ 标签添加成功: ${REGISTRY}${IMAGE_NAME}:${new_version}"
 }
@@ -199,16 +199,11 @@ main() {
         build-dev)
             build_image "development" "$NO_CACHE" "$PLATFORMS"
             ;;
-        build-test)
-            build_image "test" "$NO_CACHE" "$PLATFORMS"
-            ;;
         push)
-            shift
-            push_image "$1"
+            push_image "$REGISTRY"
             ;;
         tag)
-            shift
-            tag_image "$1"
+            tag_image "$VERSION"
             ;;
         clean)
             clean_build_cache

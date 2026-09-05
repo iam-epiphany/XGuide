@@ -1,8 +1,10 @@
 """SSE 流式接口集成测试：打桩编排器，验证 meta/tool/delta/done 事件流完整链路。"""
+
 from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 from agents.agent_orchestrator import OrchestratorResult
 import api.main as m
@@ -13,8 +15,10 @@ class _FakeMemory:
     async def get_context(self, user_id, conv_id, query=""):
         class Ctx:
             recent_messages = []
+
             def to_prompt_text(self):
                 return ""
+
         return Ctx()
 
     async def add_message(self, *args, **kwargs):
@@ -28,10 +32,10 @@ class _FakeOrchestrator:
     async def run(self, req, on_event=None):
         if on_event:
             await on_event({"type": "meta", "domain": "campus_life", "action": "query", "agent": "campus_life"})
-            await on_event({"type": "tool", "name": "knowledge_search", "status": "start",
-                            "input": {"query": "食堂关门时间"}})
-            await on_event({"type": "tool", "name": "knowledge_search", "status": "done",
-                            "titles": ["食堂与餐饮"]})
+            await on_event(
+                {"type": "tool", "name": "knowledge_search", "status": "start", "input": {"query": "食堂关门时间"}}
+            )
+            await on_event({"type": "tool", "name": "knowledge_search", "status": "done", "titles": ["食堂与餐饮"]})
             for ch in ("南校区食堂", "一般晚上七点关门"):
                 await on_event({"type": "delta", "text": ch})
         return OrchestratorResult(
@@ -118,11 +122,13 @@ def test_chat_semantic_cache_hit_skips_llm():
 
     state._orchestrator = _FakeOrchestrator()
     state._memory = _FakeMemory()
-    state._semantic_cache = _FakeCache(hit={
-        "response": "缓存中的回答",
-        "domain": "academic",
-        "agent_type": "academic",
-    })
+    state._semantic_cache = _FakeCache(
+        hit={
+            "response": "缓存中的回答",
+            "domain": "academic",
+            "agent_type": "academic",
+        }
+    )
 
     req = m.ChatRequest(message="选课什么时候开始？", user_id="u1")
     resp = asyncio.run(m.chat(req, Response()))
@@ -147,11 +153,13 @@ def test_chat_semantic_cache_miss_runs_orchestrator():
 
 
 def test_chat_stream_semantic_cache_hit_skips_llm():
-    state._semantic_cache = _FakeCache(hit={
-        "response": "缓存中的回答",
-        "domain": "academic",
-        "agent_type": "academic",
-    })
+    state._semantic_cache = _FakeCache(
+        hit={
+            "response": "缓存中的回答",
+            "domain": "academic",
+            "agent_type": "academic",
+        }
+    )
 
     req = m.ChatRequest(message="选课什么时候开始？", user_id="u1")
     resp = asyncio.run(m.chat_stream(req))
@@ -173,11 +181,13 @@ def test_personal_domain_cache_hit_is_discarded():
 
     state._orchestrator = _FakeOrchestrator()
     state._memory = _FakeMemory()
-    state._semantic_cache = _FakeCache(hit={
-        "response": "用户A的课表：08:30 高等数学",
-        "domain": "personal",
-        "agent_type": "personal",
-    })
+    state._semantic_cache = _FakeCache(
+        hit={
+            "response": "用户A的课表：08:30 高等数学",
+            "domain": "personal",
+            "agent_type": "personal",
+        }
+    )
 
     # 非流式 /chat：命中 personal 缓存 → 丢弃，走编排器（Fake 返回食堂答案）
     req = m.ChatRequest(message="今天有什么课？", user_id="u2")
@@ -196,6 +206,7 @@ def test_personal_domain_cache_hit_is_discarded():
 
 
 # ── SSE 客户端断开取消（防僵尸任务）────────────────────────────────────────────
+
 
 class _DisconnectedRequest:
     """
@@ -241,7 +252,7 @@ def test_chat_stream_client_disconnect_cancels_task(monkeypatch):
     state._orchestrator = _SlowOrchestrator()
     state._memory = _Mem()
     state._semantic_cache = _FakeCache()
-    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: None)
+    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: SimpleNamespace(id="u1"))
 
     req = m.ChatRequest(message="南校区食堂几点关门？", user_id="u1")
     resp = asyncio.run(m.chat_stream(req, request=_DisconnectedRequest()))
@@ -271,7 +282,7 @@ def test_chat_stream_disconnect_polled_during_silent_period(monkeypatch):
     state._orchestrator = _SilentOrchestrator()
     state._memory = _FakeMemory()
     state._semantic_cache = _FakeCache()
-    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: None)
+    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: SimpleNamespace(id="u1"))
 
     req = m.ChatRequest(message="南校区食堂几点关门？", user_id="u1")
     resp = asyncio.run(m.chat_stream(req, request=_DisconnectedRequest()))
@@ -279,3 +290,24 @@ def test_chat_stream_disconnect_polled_during_silent_period(monkeypatch):
 
     assert [e["type"] for e in events] == ["hello"]
     assert cancelled["hit"] is True
+
+
+def test_chat_rejects_anonymous_http_requests():
+    """HTTP 请求未登录 → 401：防止匿名访客共用 "anonymous" 记忆身份互相串扰。"""
+    from fastapi import HTTPException
+    import pytest
+
+    state._orchestrator = _FakeOrchestrator()
+    state._memory = _FakeMemory()
+
+    class _AnonRequest:
+        scope = {"headers": []}
+
+    req = m.ChatRequest(message="你好", user_id="anonymous")
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(m.chat(req, m.Response(), request=_AnonRequest()))
+    assert ei.value.status_code == 401
+
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(m.chat_stream(req, request=_AnonRequest()))
+    assert ei.value.status_code == 401

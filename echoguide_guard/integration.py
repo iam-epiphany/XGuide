@@ -14,6 +14,7 @@ EchoGuard 真实接入 —— FastAPI HTTP 中间件
 
 启用：ECHOGUIDE_GUARD_ENABLED 默认 1（注入检测/限流/审计开箱即用）。
 """
+
 from collections import defaultdict, deque
 import hashlib
 import hmac
@@ -34,12 +35,12 @@ logger = logging.getLogger(__name__)
 # 每个模式带稳定名称：拦截日志与告警聚合时按名称归类，而非一坨正则。
 _INJECTION_PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     ("inject_ignore_previous", re.compile(r"ignore\s+(all\s+)?previous\s+instructions", re.IGNORECASE)),
-    ("inject_do_not_mention",  re.compile(r"不要向用户提及|do not (tell|mention)", re.IGNORECASE)),
-    ("inject_hidden_content",  re.compile(r"<important>|<!--\s*(system|ignore)", re.IGNORECASE)),
-    ("inject_read_env",        re.compile(r"read\s+/app/\.env", re.IGNORECASE)),
-    ("inject_read_env_cn",     re.compile(r"读取\s*/app/\.env", re.IGNORECASE)),
+    ("inject_do_not_mention", re.compile(r"不要向用户提及|do not (tell|mention)", re.IGNORECASE)),
+    ("inject_hidden_content", re.compile(r"<important>|<!--\s*(system|ignore)", re.IGNORECASE)),
+    ("inject_read_env", re.compile(r"read\s+/app/\.env", re.IGNORECASE)),
+    ("inject_read_env_cn", re.compile(r"读取\s*/app/\.env", re.IGNORECASE)),
     ("inject_ignore_above_cn", re.compile(r"忽略(之前|以上).{0,8}(指令|指示)", re.IGNORECASE)),
-    ("inject_impersonate",     re.compile(r"你(现在|将).{0,6}(扮演|伪装)", re.IGNORECASE)),
+    ("inject_impersonate", re.compile(r"你(现在|将).{0,6}(扮演|伪装)", re.IGNORECASE)),
 )
 _INJECTION_RE = re.compile("|".join(p.pattern for _, p in _INJECTION_PATTERNS), re.IGNORECASE)
 
@@ -67,14 +68,27 @@ class GuardSettings:
     """中间件配置（环境变量驱动）。"""
 
     def __init__(self, **kwargs):
-        self.enabled            = kwargs.get("enabled", os.getenv("ECHOGUIDE_GUARD_ENABLED", "1") == "1")
-        self.token              = kwargs.get("token", os.getenv("ECHOGUIDE_GUARD_TOKEN", "") or None)
-        self.max_message_chars  = int(kwargs.get("max_message_chars", os.getenv("ECHOGUIDE_GUARD_MAX_MESSAGE_CHARS", "2000")))
-        self.user_rate_per_min  = int(kwargs.get("user_rate_per_min", os.getenv("ECHOGUIDE_GUARD_USER_RATE", "30")))
-        self.ip_rate_per_min    = int(kwargs.get("ip_rate_per_min", os.getenv("ECHOGUIDE_GUARD_IP_RATE", "120")))
+        self.enabled = kwargs.get("enabled", os.getenv("ECHOGUIDE_GUARD_ENABLED", "1") == "1")
+        self.token = kwargs.get("token", os.getenv("ECHOGUIDE_GUARD_TOKEN", "") or None)
+        self.max_message_chars = int(
+            kwargs.get("max_message_chars", os.getenv("ECHOGUIDE_GUARD_MAX_MESSAGE_CHARS", "2000"))
+        )
+        self.user_rate_per_min = int(kwargs.get("user_rate_per_min", os.getenv("ECHOGUIDE_GUARD_USER_RATE", "30")))
+        self.ip_rate_per_min = int(kwargs.get("ip_rate_per_min", os.getenv("ECHOGUIDE_GUARD_IP_RATE", "120")))
 
     # 需要保护的端点前缀（/auth 登录/注册同样限流，但豁免身份认证）
-    PROTECTED_PREFIXES = ("/chat", "/auth", "/eval/run", "/knowledge", "/skills/reload", "/personal", "/mcp", "/traces", "/monitor", "/campus/reload")
+    PROTECTED_PREFIXES = (
+        "/chat",
+        "/auth",
+        "/eval/run",
+        "/knowledge",
+        "/skills/reload",
+        "/personal",
+        "/mcp",
+        "/traces",
+        "/monitor",
+        "/campus/reload",
+    )
 
 
 class _RateLimiter:
@@ -84,7 +98,7 @@ class _RateLimiter:
 
     def __init__(self, user_limit: int, ip_limit: int):
         self.user_limit = user_limit
-        self.ip_limit   = ip_limit
+        self.ip_limit = ip_limit
         self._hits: Dict[str, Deque[float]] = defaultdict(lambda: deque())
         self._last_cleanup = 0.0
 
@@ -103,10 +117,7 @@ class _RateLimiter:
 
     def _cleanup(self, now: float) -> None:
         """周期性清理空桶与长时间未访问的桶，避免键无限累积。"""
-        stale = [
-            k for k, q in self._hits.items()
-            if not q or now - q[-1] > self._CLEANUP_INTERVAL_S
-        ]
+        stale = [k for k, q in self._hits.items() if not q or now - q[-1] > self._CLEANUP_INTERVAL_S]
         for k in stale:
             del self._hits[k]
 
@@ -135,8 +146,11 @@ class EchoGuardMiddleware:
             logger.exception(f"[EchoGuard] 中间件异常: {ex}")
             if protected:
                 await self._reject(
-                    send, 503, "安全检查暂不可用，请稍后重试",
-                    path=scope.get("path", ""), method=scope.get("method", "GET"),
+                    send,
+                    503,
+                    "安全检查暂不可用，请稍后重试",
+                    path=scope.get("path", ""),
+                    method=scope.get("method", "GET"),
                     reason="guard_error",
                 )
             else:
@@ -170,22 +184,27 @@ class EchoGuardMiddleware:
             if needs_auth and auth_user is None and not bearer_ok:
                 # 未授权试探：带令牌则按令牌哈希留痕，否则按匿名 IP
                 probe_subject = (
-                    f"token:{hashlib.sha256(auth_header).hexdigest()[:32]}"
-                    if auth_header else "anon:unknown"
+                    f"token:{hashlib.sha256(auth_header).hexdigest()[:32]}" if auth_header else "anon:unknown"
                 )
                 await self._reject(
-                    send, 401, "未授权：请先登录或提供有效访问令牌",
-                    path=path, method=method, subject=probe_subject, reason="unauthorized",
+                    send,
+                    401,
+                    "未授权：请先登录或提供有效访问令牌",
+                    path=path,
+                    method=method,
+                    subject=probe_subject,
+                    reason="unauthorized",
                 )
                 return
 
         # 2. 仅为带请求体的方法读取并缓存，再将同一 body 重放给下游。
         # GET/DELETE 也接受服务级 token 和限流，但不因无 body 消耗 receive。
-        body = b""
+        body: bytes = b""
         if method in {"POST", "PUT", "PATCH"}:
-            body = await self._read_body(receive)
-            if body is None:
+            read = await self._read_body(receive)
+            if read is None:
                 return
+            body = read
 
         client = scope.get("client", ("", 0))[0] or "unknown"
 
@@ -201,21 +220,30 @@ class EchoGuardMiddleware:
         # 检测。否则 28+ 场景的串行测评会被演示环境的分钟级限流截断，导致
         # "缓存/429" 而非真实编排结果。生产环境未开启开关时该头没有任何作用。
         headers = dict(scope.get("headers", []))
-        benchmark_request = (
-            os.getenv("ECHOGUIDE_BENCHMARK_ENABLED", "0") == "1"
-            and bool(headers.get(b"x-echoguide-benchmark-strategy", b"").strip())
+        benchmark_request = os.getenv("ECHOGUIDE_BENCHMARK_ENABLED", "0") == "1" and bool(
+            headers.get(b"x-echoguide-benchmark-strategy", b"").strip()
         )
         if not benchmark_request:
             if not self._limiter.allow(rate_key, self.settings.user_rate_per_min):
                 await self._reject(
-                    send, 429, "请求过于频繁，请稍后再试",
-                    path=path, method=method, subject=rate_key, reason="rate_limit",
+                    send,
+                    429,
+                    "请求过于频繁，请稍后再试",
+                    path=path,
+                    method=method,
+                    subject=rate_key,
+                    reason="rate_limit",
                 )
                 return
             if not self._limiter.allow(f"ip:{client}", self.settings.ip_rate_per_min):
                 await self._reject(
-                    send, 429, "请求过于频繁，请稍后再试",
-                    path=path, method=method, subject=f"ip:{client}", reason="rate_limit",
+                    send,
+                    429,
+                    "请求过于频繁，请稍后再试",
+                    path=path,
+                    method=method,
+                    subject=f"ip:{client}",
+                    reason="rate_limit",
                 )
                 return
 
@@ -225,17 +253,29 @@ class EchoGuardMiddleware:
         overlong = next((t for t in texts if len(t) > self.settings.max_message_chars), None)
         if overlong is not None:
             await self._reject(
-                send, 413, f"请求内容过长：上限 {self.settings.max_message_chars} 字",
-                path=path, method=method, subject=rate_key, reason="too_long", sample=overlong,
+                send,
+                413,
+                f"请求内容过长：上限 {self.settings.max_message_chars} 字",
+                path=path,
+                method=method,
+                subject=rate_key,
+                reason="too_long",
+                sample=overlong,
             )
             return
         injection_hit = self._find_injection(texts)
         if injection_hit is not None:
             pattern_name, matched = injection_hit
             await self._reject(
-                send, 403, "检测到疑似注入内容，请求已拦截",
-                path=path, method=method, subject=rate_key, reason="injection",
-                pattern=pattern_name, sample=matched,
+                send,
+                403,
+                "检测到疑似注入内容，请求已拦截",
+                path=path,
+                method=method,
+                subject=rate_key,
+                reason="injection",
+                pattern=pattern_name,
+                sample=matched,
             )
             return
 
@@ -340,11 +380,13 @@ class EchoGuardMiddleware:
         sample 只记录脱敏后截断 120 字符的片段 + 指纹哈希，便于攻击关联分析。
         """
         payload = json.dumps({"detail": message}, ensure_ascii=False).encode()
-        await send({
-            "type": "http.response.start",
-            "status": status,
-            "headers": [(b"content-type", b"application/json; charset=utf-8")],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [(b"content-type", b"application/json; charset=utf-8")],
+            }
+        )
         await send({"type": "http.response.body", "body": payload})
         level = logging.ERROR if reason == "injection" else logging.WARNING
         sample_text = str(sample or "")
@@ -364,6 +406,4 @@ class EchoGuardMiddleware:
         sample = " ".join(texts)[:120]
         digest = hashlib.sha256(sample.encode("utf-8")).hexdigest()[:16]
         summary = redact_text(sample)
-        logger.info(
-            f"[EchoGuard] 放行 path={path} subject={subject} sha256={digest} msg={summary!r}"
-        )
+        logger.info(f"[EchoGuard] 放行 path={path} subject={subject} sha256={digest} msg={summary!r}")

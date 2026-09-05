@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# EchoGuide 智能客服系统 - Docker 部署脚本
-
+# EchoGuide Docker 部署脚本（旧版，仅维护修复，不再新增功能）
+#
+# ⚠️ 本脚本已被 deploy.sh 取代：后者使用 8100 端口口径、包含部署前配置校验，
+#    且文档均以 deploy.sh 为准。建议尽快迁移；本脚本将在后续版本移除。
 
 set -e
 
@@ -15,6 +17,16 @@ NC='\033[0m' # No Color
 PROJECT_NAME="echoguide"
 COMPOSE_FILE="docker-compose.yml"
 ENV_FILE=".env"
+
+# 从 .env 读取 Redis 密码（compose 启动 Redis 时以该值 --requirepass）；
+# 与 docker-compose.yml 的默认回退值保持一致
+redis_password() {
+    local pwd=""
+    if [ -f "$ENV_FILE" ]; then
+        pwd=$(grep -E '^REDIS_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+    fi
+    echo "${pwd:-echoguide123}"
+}
 
 # 函数：打印信息
 print_info() {
@@ -52,7 +64,6 @@ create_directories() {
 
     mkdir -p data/chroma
     mkdir -p logs
-    mkdir -p config/nginx/ssl
     mkdir -p config/alerts
 
     print_info "目录创建完成"
@@ -141,22 +152,22 @@ health_check() {
     # 等待服务启动
     sleep 10
 
-    # 检查主应用
-    if curl -sf http://localhost:8000/health > /dev/null; then
+    # 检查主应用（compose 映射宿主机 8100 → 容器 8000）
+    if curl -sf http://localhost:8100/health > /dev/null; then
         print_info "✓ 主应用健康"
     else
         print_error "✗ 主应用不健康"
     fi
 
-    # 检查 Redis
-    if docker compose exec -T redis redis-cli ping | grep -q PONG; then
+    # 检查 Redis（开启 --requirepass 后需携带认证，否则返回 NOAUTH）
+    if docker compose exec -T redis redis-cli -a "$(redis_password)" ping 2>/dev/null | grep -q PONG; then
         print_info "✓ Redis 健康"
     else
         print_error "✗ Redis 不健康"
     fi
 
     # 检查 ChromaDB
-    if curl -sf http://localhost:8001/api/v1/heartbeat > /dev/null; then
+    if curl -sf http://localhost:8001/api/v2/heartbeat > /dev/null; then
         print_info "✓ ChromaDB 健康"
     else
         print_error "✗ ChromaDB 不健康"
@@ -193,8 +204,8 @@ backup_data() {
 
     mkdir -p "$backup_dir"
 
-    # 备份 Redis 数据
-    docker compose exec -T redis redis-cli SAVE
+    # 备份 Redis 数据（带认证）
+    docker compose exec -T redis redis-cli -a "$(redis_password)" SAVE
     docker cp echoguide-redis:/data/dump.rdb "$backup_dir/"
 
     # 备份 ChromaDB 数据
@@ -252,7 +263,7 @@ restore_data() {
 # 函数：显示帮助信息
 show_help() {
     cat << EOF
-EchoGuide 智能客服系统 - Docker 部署脚本
+EchoGuide Docker 部署脚本（旧版，已被 deploy.sh 取代）
 
 用法: ./docker-deploy.sh [命令]
 

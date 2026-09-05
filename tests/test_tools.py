@@ -2,6 +2,7 @@
 
 项目测试惯例：手写 Fake 打桩（无 mock 库），只测确定性行为。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,12 +60,13 @@ class _FakeClient:
 
     兼容无 Key 场景（单次 Open-Meteo 调用）：url/params 指向最后一次调用。
     """
+
     def __init__(self, responses=None, errors=None, timeout=None):
         self.url = None
         self.params = None
-        self.calls = []          # [(url, params), ...] 按调用顺序记录
+        self.calls = []  # [(url, params), ...] 按调用顺序记录
         self._responses = responses or {}  # {url子串: json_data}
-        self._errors = errors or {}        # {url子串: 要抛出的异常}
+        self._errors = errors or {}  # {url子串: 要抛出的异常}
 
     async def __aenter__(self):
         return self
@@ -88,6 +90,7 @@ class _FakeClient:
 
 # ── 天气 ──────────────────────────────────────────────────────────────────────
 
+
 def test_weather_handler_calls_open_meteo(monkeypatch, tmp_path):
     fake = _FakeClient()
     monkeypatch.setattr("tools.weather.httpx.AsyncClient", lambda **kw: fake)
@@ -96,8 +99,8 @@ def test_weather_handler_calls_open_meteo(monkeypatch, tmp_path):
     assert fake.url == "https://api.open-meteo.com/v1/forecast"
     assert fake.params["forecast_days"] == 2
     assert result["current"]["temperature"] == 28.3
-    assert result["current"]["weather"] == WMO_CODES[2]          # 多云
-    assert result["daily"][1]["weather"] == WMO_CODES[61]        # 小雨
+    assert result["current"]["weather"] == WMO_CODES[2]  # 多云
+    assert result["daily"][1]["weather"] == WMO_CODES[61]  # 小雨
     assert result["daily"][1]["precip_probability"] == 85
     assert "Open-Meteo" in result["source"]
 
@@ -129,6 +132,7 @@ def test_weather_handler_bad_days_value_falls_back(monkeypatch):
 
 # ── 和风天气（主源，配置 QWEATHER_API_KEY 后启用）────────────────────────────
 
+
 def _qweather_now():
     return {
         "code": "200",
@@ -140,10 +144,22 @@ def _qweather_daily():
     return {
         "code": "200",
         "daily": [
-            {"fxDate": "2026-08-14", "textDay": "多云", "tempMax": "31", "tempMin": "22",
-             "precip": 10, "windSpeedDay": "12"},
-            {"fxDate": "2026-08-15", "textDay": "小雨", "tempMax": "26", "tempMin": "19",
-             "precip": 85, "windSpeedDay": "18"},
+            {
+                "fxDate": "2026-08-14",
+                "textDay": "多云",
+                "tempMax": "31",
+                "tempMin": "22",
+                "precip": 10,
+                "windSpeedDay": "12",
+            },
+            {
+                "fxDate": "2026-08-15",
+                "textDay": "小雨",
+                "tempMax": "26",
+                "tempMin": "19",
+                "precip": 85,
+                "windSpeedDay": "18",
+            },
         ],
     }
 
@@ -152,10 +168,12 @@ def test_weather_handler_uses_qweather_when_key_set(monkeypatch):
     """配置和风 Key 后：调用 devapi.qweather.com 的 now + 7d 两接口，不碰 Open-Meteo。"""
     monkeypatch.setattr("tools.weather.QWEATHER_KEY", "HE-test-key")
     monkeypatch.setattr("tools.weather.QWEATHER_BASE", "https://devapi.qweather.com")  # 固定域名，避免受 .env 影响
-    fake = _FakeClient(responses={
-        "/v7/weather/now": _qweather_now(),
-        "/v7/weather/7d": _qweather_daily(),
-    })
+    fake = _FakeClient(
+        responses={
+            "/v7/weather/now": _qweather_now(),
+            "/v7/weather/7d": _qweather_daily(),
+        }
+    )
     monkeypatch.setattr("tools.weather.httpx.AsyncClient", lambda **kw: fake)
 
     result = asyncio.run(weather_handler({"place": "南校区", "days": 2}, {}))
@@ -178,10 +196,12 @@ def test_weather_handler_uses_custom_qweather_host(monkeypatch):
     """回归：新账号专属 API Host（QWEATHER_API_HOST）优先于旧公共域名。"""
     monkeypatch.setattr("tools.weather.QWEATHER_KEY", "HE-test-key")
     monkeypatch.setattr("tools.weather.QWEATHER_BASE", "https://abc1234.def.qweatherapi.com")
-    fake = _FakeClient(responses={
-        "/v7/weather/now": _qweather_now(),
-        "/v7/weather/7d": _qweather_daily(),
-    })
+    fake = _FakeClient(
+        responses={
+            "/v7/weather/now": _qweather_now(),
+            "/v7/weather/7d": _qweather_daily(),
+        }
+    )
     monkeypatch.setattr("tools.weather.httpx.AsyncClient", lambda **kw: fake)
 
     asyncio.run(weather_handler({}, {}))
@@ -193,9 +213,11 @@ def test_weather_handler_falls_back_on_qweather_error_code(monkeypatch):
     """回归：和风返回非 200 业务码（如 402 免费额度用尽）→ 自动回退 Open-Meteo。"""
     monkeypatch.setattr("tools.weather.QWEATHER_KEY", "HE-test-key")
     monkeypatch.setattr("tools.weather.QWEATHER_BASE", "https://devapi.qweather.com")  # 固定域名，避免受 .env 影响
-    fake = _FakeClient(responses={
-        "/v7/weather/now": {"code": "402", "now": {}},  # HTTP 200，业务错误码
-    })
+    fake = _FakeClient(
+        responses={
+            "/v7/weather/now": {"code": "402", "now": {}},  # HTTP 200，业务错误码
+        }
+    )
     monkeypatch.setattr("tools.weather.httpx.AsyncClient", lambda **kw: fake)
 
     result = asyncio.run(weather_handler({}, {}))
@@ -217,6 +239,7 @@ def test_weather_handler_falls_back_on_qweather_network_error(monkeypatch):
 
 # ── 课表 / 待办 / DDL 工具 ───────────────────────────────────────────────────
 
+
 def test_schedule_tool_without_schedule_guides_import(tmp_path):
     ctx = _ctx(tmp_path)
     result = asyncio.run(query_schedule_handler({"date": "今天"}, ctx))
@@ -228,10 +251,21 @@ def test_schedule_tool_without_schedule_guides_import(tmp_path):
 def test_schedule_tool_returns_courses(tmp_path):
     ctx = _ctx(tmp_path)
     service = ctx["personal_service"]
-    asyncio.run(service.import_courses("u1", [
-        {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05",
-         "location": "B-101", "weeks": "1-16"},
-    ]))
+    asyncio.run(
+        service.import_courses(
+            "u1",
+            [
+                {
+                    "course": "高数",
+                    "day_of_week": 0,
+                    "start_time": "08:30",
+                    "end_time": "10:05",
+                    "location": "B-101",
+                    "weeks": "1-16",
+                },
+            ],
+        )
+    )
     # 2026-09-07 为开学第 1 周周一
     result = asyncio.run(query_schedule_handler({"date": "2026-09-07"}, ctx))
     assert result["courses"][0]["course"] == "高数"
@@ -241,9 +275,14 @@ def test_schedule_tool_returns_courses(tmp_path):
 def test_schedule_tool_user_isolation(tmp_path):
     ctx_a = _ctx(tmp_path, user_id="u1")
     ctx_b = _ctx(tmp_path, user_id="u2")
-    asyncio.run(ctx_a["personal_service"].import_courses("u1", [
-        {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05", "weeks": ""},
-    ]))
+    asyncio.run(
+        ctx_a["personal_service"].import_courses(
+            "u1",
+            [
+                {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05", "weeks": ""},
+            ],
+        )
+    )
     result_a = asyncio.run(query_schedule_handler({"date": "2026-09-07"}, ctx_a))
     result_b = asyncio.run(query_schedule_handler({"date": "2026-09-07"}, ctx_b))
     assert len(result_a["courses"]) == 1
@@ -252,8 +291,7 @@ def test_schedule_tool_user_isolation(tmp_path):
 
 def test_todo_tool_full_flow(tmp_path):
     ctx = _ctx(tmp_path)
-    added = asyncio.run(add_todo_handler(
-        {"content": "交实验报告", "kind": "ddl", "due_at": "2026-09-14"}, ctx))
+    added = asyncio.run(add_todo_handler({"content": "交实验报告", "kind": "ddl", "due_at": "2026-09-14"}, ctx))
     assert added["available"] is True
     assert added["todo"]["kind"] == "ddl"
 
@@ -286,11 +324,15 @@ def test_ddl_tool_returns_countdown(tmp_path):
 
 # ── 校园信息工具 ──────────────────────────────────────────────────────────────
 
+
 def test_campus_tool_shuttle(tmp_path):
-    (tmp_path / "shuttle_schedule.json").write_text(json.dumps({
-        "routes": [{"name": "南校区→北校区", "direction": "南→北",
-                    "departures": ["07:00", "08:00", "23:00"]}]
-    }, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "shuttle_schedule.json").write_text(
+        json.dumps(
+            {"routes": [{"name": "南校区→北校区", "direction": "南→北", "departures": ["07:00", "08:00", "23:00"]}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     ctx = _ctx(tmp_path)
     result = asyncio.run(campus_info_handler({"category": "shuttle", "keyword": "南→北"}, ctx))
     assert result["available"] is True
@@ -315,6 +357,7 @@ def test_campus_tool_auto_returns_all_public_data_categories(tmp_path):
 
 
 # ── with_service 注入 ─────────────────────────────────────────────────────────
+
 
 def test_with_service_injects_deps(tmp_path):
     async def handler(params, context):

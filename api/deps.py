@@ -1,4 +1,5 @@
 """API 层认证依赖（登录用户 / 管理员 / 可观测权限）。"""
+
 from __future__ import annotations
 
 import os

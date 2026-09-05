@@ -14,6 +14,7 @@
 指标（evaluation/evaluator.py compute_retrieval_metrics，纯 Python 确定性）：
   HitRate@K / Recall@K / MRR，K=5。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,15 +59,17 @@ async def _run_rerank(kb: KnowledgeBase, manager: MCPToolManager, cases, top_k: 
 
 async def _run_full(kb: KnowledgeBase, manager: MCPToolManager, cases, top_k: int = 5) -> list:
     """完整优化链路：查询改写 → 并行召回 → 去重 → 重排（与主链路同实现）。"""
-    manager.register(Tool(
-        name="knowledge_search",
-        description="检索校园知识库",
-        handler=kb.search_handler,
-        schema={"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer"}}},
-        cache_ttl=300.0,
-        use_rewrite=False,  # search_with_rewrite 内部自管理改写，避免递归
-        effect=ToolEffect.READ,
-    ))
+    manager.register(
+        Tool(
+            name="knowledge_search",
+            description="检索校园知识库",
+            handler=kb.search_handler,
+            schema={"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer"}}},
+            cache_ttl=300.0,
+            use_rewrite=False,  # search_with_rewrite 内部自管理改写，避免递归
+            effect=ToolEffect.READ,
+        )
+    )
     results = []
     for c in cases:
         result = await manager.search_with_rewrite("knowledge_search", c.query, top_k=top_k)
@@ -86,8 +89,10 @@ async def main() -> int:
     kb = KnowledgeBase()
 
     if args.mode == "full" and not _llm_config()["api_key"]:
-        print("[错误] full 模式需要 LLM 配置（查询改写）：设置 ANTHROPIC_API_KEY（或 ECHOGUIDE_FAST_API_KEY）。"
-              "离线档位请用 --mode baseline / rerank。")
+        print(
+            "[错误] full 模式需要 LLM 配置（查询改写）：设置 ANTHROPIC_API_KEY（或 ECHOGUIDE_FAST_API_KEY）。"
+            "离线档位请用 --mode baseline / rerank。"
+        )
         return 2
 
     if args.mode == "baseline":
@@ -116,8 +121,28 @@ async def main() -> int:
         "total": len(cases),
         "metrics": {k: v for k, v in metrics.items() if k != "cases"},
     }
+    # 逐用例明细单独落盘（data/eval/results/ 已 gitignore）：主报告保持精简，
+    # 但排障时可审计每一例的检索结果，不再"落盘即丢明细"
+    if metrics.get("cases"):
+        detail_path = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "data"
+            / "eval"
+            / "results"
+            / f"retrieval_{args.mode}_cases.json"
+        )
+        detail_path.parent.mkdir(parents=True, exist_ok=True)
+        detail_path.write_text(
+            json.dumps({"mode": args.mode, "cases": metrics["cases"]}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"[detail] {detail_path}")
 
-    out = pathlib.Path(args.out) if args.out else pathlib.Path(__file__).resolve().parents[1] / "data" / "eval" / f"retrieval_{args.mode}.json"
+    out = (
+        pathlib.Path(args.out)
+        if args.out
+        else pathlib.Path(__file__).resolve().parents[1] / "data" / "eval" / f"retrieval_{args.mode}.json"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 

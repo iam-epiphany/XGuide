@@ -11,13 +11,18 @@
   python evaluation/run_dialog_eval.py --smoke          # 只跑前 3 组（联调）
   python evaluation/run_dialog_eval.py --no-baseline    # 不写回基线
 
+评测存储与生产隔离（data/eval/ 下独立 memory.db/chroma，Redis 用 15 号库），
+可用 EVAL_REDIS_URL 覆盖；ECHOGUIDE_EVAL_ISOLATED=0 可关闭隔离。
+
 说明：需要 .env 中配置 LLM API Key（生成与 Judge 可同模型，也可用 EVAL_JUDGE_* 分离）。
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+import os
 import pathlib
 import sys
 
@@ -29,11 +34,28 @@ load_dotenv()  # 加载 .env
 
 from evaluation.cases import load_dialog_cases  # noqa: E402
 
+# ── 评测与生产存储隔离 ────────────────────────────────────────────────────────
+# 评测跑真实编排链会写入记忆（eval_user 的对话痕迹此前直接落进生产
+# memory.db / Chroma / Redis）。构建 runtime 前把三处存储重定向到
+# data/eval/ 专用目录与 Redis 15 号库，评测数据可整目录删除。
+_ISOLATED = os.environ.setdefault("ECHOGUIDE_EVAL_ISOLATED", "1") == "1"
+if _ISOLATED:
+    os.environ["ECHOGUIDE_MEMORY_DB"] = str(ROOT / "data" / "eval" / "memory.db")
+    os.environ["CHROMA_PERSIST_DIRECTORY"] = str(ROOT / "data" / "eval" / "chroma")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    if "EVAL_REDIS_URL" in os.environ:
+        os.environ["REDIS_URL"] = os.environ["EVAL_REDIS_URL"]
+    elif redis_url.rstrip("/").endswith("/0"):
+        os.environ["REDIS_URL"] = redis_url.rstrip("/")[:-1] + "15"  # 切到 15 号库
+
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description="端到端对话评测（LLM-as-Judge）")
     parser.add_argument("--smoke", action="store_true", help="只跑前 3 组（联调用）")
-    parser.add_argument("--no-baseline", action="store_true", help="不写回评测基线")
+    parser.add_argument("--no-baseline", action="store_true", help="(兼容保留) 不写回基线；新默认即不写")
+    parser.add_argument(
+        "--promote-baseline", action="store_true", help="把本次结果写回评测基线（默认不写，避免回归检测被自覆盖）"
+    )
     parser.add_argument("--out", default=None, help="输出 JSON 路径（默认 data/eval/e2e_dialog.json）")
     args = parser.parse_args()
 
@@ -52,7 +74,7 @@ async def main() -> int:
     report = await evaluator.run(
         dialog_cases=cases,
         dataset="dialog_cases_v1",
-        promote_baseline=not args.no_baseline,
+        promote_baseline=args.promote_baseline and not args.no_baseline,
     )
 
     # 汇总关键指标

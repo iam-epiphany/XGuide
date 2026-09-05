@@ -10,11 +10,18 @@ from tools.it_tool import diagnose_it_issue_handler
 
 
 def test_weighted_score_is_deterministic_and_not_gpa():
-    result = asyncio.run(calculate_weighted_score_handler({"courses": [
-        {"name": "高数", "credits": 4, "score": 90},
-        {"name": "物理", "credits": 3, "score": 84},
-        {"name": "英语", "credits": 2, "score": 92},
-    ]}, {}))
+    result = asyncio.run(
+        calculate_weighted_score_handler(
+            {
+                "courses": [
+                    {"name": "高数", "credits": 4, "score": 90},
+                    {"name": "物理", "credits": 3, "score": 84},
+                    {"name": "英语", "credits": 2, "score": 92},
+                ]
+            },
+            {},
+        )
+    )
     assert result["total_credits"] == 9
     assert result["weighted_score"] == pytest.approx(88.44, abs=0.01)
     assert "不是学校官方 GPA" in result["disclaimer"]
@@ -44,9 +51,15 @@ def test_affairs_process_unknown_is_explicit():
 
 
 def test_it_diagnostic_matches_network_branch():
-    result = asyncio.run(diagnose_it_issue_handler({
-        "system": "校园网", "symptom": "认证成功但网页打不开",
-    }, {}))
+    result = asyncio.run(
+        diagnose_it_issue_handler(
+            {
+                "system": "校园网",
+                "symptom": "认证成功但网页打不开",
+            },
+            {},
+        )
+    )
     assert result["matched"] is True
     diagnosis = result["diagnosis"]
     assert diagnosis["steps"]
@@ -57,3 +70,37 @@ def test_it_diagnostic_matches_network_branch():
 def test_it_diagnostic_unknown_falls_back_cleanly():
     result = asyncio.run(diagnose_it_issue_handler({"system": "量子终端", "symptom": "闪烁"}, {}))
     assert result["matched"] is False
+
+
+# ── add_todo due_at 格式校验（坏格式曾持续打坏 upcoming/overview 查询）──────────
+
+
+def test_add_todo_rejects_relative_or_malformed_due_at():
+    from tools.todo_tool import add_todo_handler
+
+    for bad in ("周三下午", "明天", "2026/09/14", "2026-13-01", "09-14"):
+        result = asyncio.run(
+            add_todo_handler(
+                {"content": "交实验报告", "due_at": bad},
+                {"user_id": "u1", "personal_service": object()},
+            )
+        )
+        assert result["available"] is False, f"应拒绝 {bad!r}"
+        assert "due_at 格式无效" in result["message"]
+
+
+def test_add_todo_accepts_iso_formats(tmp_path):
+    from personal.service import PersonalService
+    from personal.store import PersonalStore
+    from tools.todo_tool import add_todo_handler
+
+    service = PersonalService(PersonalStore(str(tmp_path / "todo.db")))
+    for due in ("2026-09-14", "2026-09-14 09:30"):
+        result = asyncio.run(
+            add_todo_handler(
+                {"content": "交实验报告", "due_at": due},
+                {"user_id": "u1", "personal_service": service},
+            )
+        )
+        assert result["available"] is True, result
+        assert result["todo"]["due_at"] == due

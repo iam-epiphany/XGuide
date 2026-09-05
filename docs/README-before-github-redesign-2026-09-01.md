@@ -43,27 +43,27 @@ Agent Runtime / Harness
 以下截图由 Playwright 访问真实网页、登录 Demo 用户、导入动态课表、调用真实 DeepSeek 模型后自动生成；使用 `?debug=1` 展开 Profile、分类阶段、工具、DAG、Token 和 Trace ID。
 ### 架构图
 
-![架构图](assets/readme/overview.png)
+![架构图](../assets/readme/overview.png)
 
 ### Fast · 个人课表
 
-![Fast 个人课表实测](assets/readme/01-fast-personal.png)
+![Fast 个人课表实测](../assets/readme/01-fast-personal.png)
 
 ### 领域专属工具
 
-![Affairs 专属工具实测](assets/readme/02-specialized-tools.png)
+![Affairs 专属工具实测](../assets/readme/02-specialized-tools.png)
 
 ### Deep · Agentic RAG
 
-![Deep RAG 实测](assets/readme/03-deep-rag.png)
+![Deep RAG 实测](../assets/readme/03-deep-rag.png)
 
 ### 多任务依赖 DAG
 
-![多任务 DAG 实测](assets/readme/04-multi-agent-dag.png)
+![多任务 DAG 实测](../assets/readme/04-multi-agent-dag.png)
 
 ### 多轮记忆与 Guard 拒绝
 
-![多轮记忆与 Prompt 注入拦截实测](assets/readme/05-memory-and-guard.png)
+![多轮记忆与 Prompt 注入拦截实测](../assets/readme/05-memory-and-guard.png)
 
 ## Fast / Deep 双路径
 
@@ -346,7 +346,7 @@ Benchmark 使用 28 个版本化 HTTP 场景与 10 条独立 RAG 探针，覆盖
 > 消融：专属工具成功率 100.0%，改用通用 RAG 后为 0.0%；依赖 DAG 成功率 100.0%，强制单 Agent 后为 0.0%。
 <!-- BENCHMARK:END -->
 
-完整机器可读结果保存在 [`assets/readme/demo-metrics.json`](assets/readme/demo-metrics.json)。报告记录时间、Git commit、模型、逐场景检查和失败信息，不隐藏不利结果。
+完整机器可读结果保存在 [`assets/readme/demo-metrics.json`](../assets/readme/demo-metrics.json)。报告记录时间、Git commit、模型、逐场景检查和失败信息，不隐藏不利结果。
 
 ## 快速启动
 
@@ -503,4 +503,3 @@ assets/readme/ README 截图与真实 Benchmark 结果
 ```
 
 > 仓库内结构化校园信息包含来源、更新时间和适用范围；无法确认的内容会明确标为演示级数据。实际办理、班次和开放时间应以学校最新官方通知为准。
-

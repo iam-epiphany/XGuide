@@ -1,4 +1,5 @@
 """对话路由：/chat、/chat/stream（SSE）、/search（RAG 链路演示）。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,13 +30,13 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    conv_id:     str
-    response:    str
-    intent:      str
-    domain:      str = "other"
-    action:      str = "other"
-    agent_type:  str
-    latency_ms:  float
+    conv_id: str
+    response: str
+    intent: str
+    domain: str = "other"
+    action: str = "other"
+    agent_type: str
+    latency_ms: float
     knowledge_used: bool = False
     cached: bool = False
     execution: Dict[str, Any] = Field(default_factory=dict)
@@ -76,9 +77,12 @@ async def chat(req: ChatRequest, response: Response, request: Request = None):
         raise HTTPException(503, "服务未就绪")
 
     # HTTP 请求只信任签名会话中的身份；request=None 保留离线单测兼容性。
+    # 对话必须登录：匿名请求若共用 "anonymous" 身份，情景记忆会跨访客互相召回。
     if request is not None:
         user = optional_user(request)
-        req.user_id = user.id if user else "anonymous"
+        if user is None:
+            raise HTTPException(401, "请先登录后使用对话")
+        req.user_id = user.id
 
     from agents.agent_orchestrator import Request as OrcReq
     from core.tracing import begin_trace, end_trace, span
@@ -110,9 +114,11 @@ async def chat(req: ChatRequest, response: Response, request: Request = None):
         #    - 依赖用户画像（user）+ 有效身份 → 只查 User（仅 user_id 分区，
         #      miss 不回退 Global，防止公共答案绕过个性化 Agent 推理）；
         #    - 强上下文依赖（skip：追问/省略句/指代/个人数据）→ 直接 bypass。
-        cached = await state._cache_get(
-            state._semantic_cache, req.message, user_id=req.user_id, dependence=dependence
-        ) if state._semantic_cache and not benchmark_request else None
+        cached = (
+            await state._cache_get(state._semantic_cache, req.message, user_id=req.user_id, dependence=dependence)
+            if state._semantic_cache and not benchmark_request
+            else None
+        )
         if cached and cached.get("domain") == "personal":
             logger.warning("命中 personal 领域缓存，丢弃（防跨用户串扰）")
             cached = None
@@ -133,18 +139,26 @@ async def chat(req: ChatRequest, response: Response, request: Request = None):
                 knowledge_used=bool(cached.get("knowledge_used", False)),
                 cached=True,
                 execution={
-                    "mode": "cache", "profile": "cache", "classifier_stage": "cache",
-                    "complexity_reason": "语义缓存命中", "agents": [cached["agent_type"]],
-                    "tools": [], "tasks": [], "model": "", "trace_id": trace.trace_id,
-                    "input_tokens": 0, "output_tokens": 0,
+                    "mode": "cache",
+                    "profile": "cache",
+                    "classifier_stage": "cache",
+                    "complexity_reason": "语义缓存命中",
+                    "agents": [cached["agent_type"]],
+                    "tools": [],
+                    "tasks": [],
+                    "model": "",
+                    "trace_id": trace.trace_id,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
                 },
             )
 
         # 3. 构建编排请求（含对话历史，用于意图识别上下文与追问继承）
-        history = [
-            {"role": m.role.value, "content": m.content}
-            for m in mem_ctx.recent_messages[-5:]
-        ] if mem_ctx.recent_messages else None
+        history = (
+            [{"role": m.role.value, "content": m.content} for m in mem_ctx.recent_messages[-5:]]
+            if mem_ctx.recent_messages
+            else None
+        )
 
         orch_req = OrcReq(
             message=req.message,
@@ -175,14 +189,17 @@ async def chat(req: ChatRequest, response: Response, request: Request = None):
             from mcp.semantic_cache import cache_tier, classify_context_dependence
 
             dep_write = classify_context_dependence(
-                req.message, ctx_text,
+                req.message,
+                ctx_text,
                 domain=result.domain.value if result.domain else None,
                 action=result.action.value if result.action else None,
             )
             tier = cache_tier(dep_write, req.user_id)
             if tier == "user":
-                state._cache_put(state._semantic_cache,
-                    req.message, result.response,
+                state._cache_put(
+                    state._semantic_cache,
+                    req.message,
+                    result.response,
                     domain=result.domain.value,
                     agent_type=result.agent_type,
                     user_id=req.user_id,
@@ -190,8 +207,10 @@ async def chat(req: ChatRequest, response: Response, request: Request = None):
                     knowledge_used="knowledge_search" in result.tools_used,
                 )
             elif tier == "global":
-                state._cache_put(state._semantic_cache,
-                    req.message, result.response,
+                state._cache_put(
+                    state._semantic_cache,
+                    req.message,
+                    result.response,
                     domain=result.domain.value,
                     agent_type=result.agent_type,
                     dependence=dep_write,
@@ -232,9 +251,12 @@ async def chat_stream(req: ChatRequest, request: Request = None):
     if state._orchestrator is None or state._memory is None:
         raise HTTPException(503, "服务未就绪")
 
+    # 对话必须登录：匿名请求若共用 "anonymous" 身份，情景记忆会跨访客互相召回。
     if request is not None:
         user = optional_user(request)
-        req.user_id = user.id if user else "anonymous"
+        if user is None:
+            raise HTTPException(401, "请先登录后使用对话")
+        req.user_id = user.id
 
     from agents.agent_orchestrator import Request as OrcReq
     from core.tracing import begin_trace, end_trace, span
@@ -261,9 +283,13 @@ async def chat_stream(req: ChatRequest, request: Request = None):
                 dependence = classify_context_dependence(req.message, ctx_text)
 
                 # 2. 双层语义缓存读取（默认关闭；读取层由上下文依赖性决定，与 /chat 完全一致）
-                cached = await state._cache_get(
-                    state._semantic_cache, req.message, user_id=req.user_id, dependence=dependence
-                ) if state._semantic_cache else None
+                cached = (
+                    await state._cache_get(
+                        state._semantic_cache, req.message, user_id=req.user_id, dependence=dependence
+                    )
+                    if state._semantic_cache
+                    else None
+                )
                 if cached and cached.get("domain") == "personal":
                     logger.warning("命中 personal 领域缓存，丢弃（防跨用户串扰）")
                     cached = None
@@ -272,29 +298,48 @@ async def chat_stream(req: ChatRequest, request: Request = None):
                     await state._memory.add_message(req.user_id, conv_id, MsgRole.USER, req.message)
                     await state._memory.add_message(req.user_id, conv_id, MsgRole.ASSISTANT, cached["response"])
                     cached_intent = cached.get("intent") or cached["domain"]
-                    await queue.put({
-                        "type": "meta", "domain": cached["domain"], "action": "query",
-                        "agent": cached["agent_type"], "cached": True,
-                    })
+                    await queue.put(
+                        {
+                            "type": "meta",
+                            "domain": cached["domain"],
+                            "action": "query",
+                            "agent": cached["agent_type"],
+                            "cached": True,
+                        }
+                    )
                     await queue.put({"type": "delta", "text": cached["response"]})
-                    await queue.put({
-                        "type": "done", "conv_id": conv_id, "response": cached["response"],
-                        "intent": cached_intent, "agent_type": cached["agent_type"],
-                        "latency_ms": round((time.perf_counter() - request_started) * 1000, 1),
-                        "knowledge_used": bool(cached.get("knowledge_used", False)), "cached": True,
-                        "execution": {
-                            "mode": "cache", "profile": "cache", "classifier_stage": "cache",
-                            "complexity_reason": "语义缓存命中", "agents": [cached["agent_type"]],
-                            "tools": [], "tasks": [], "model": "", "trace_id": trace.trace_id,
-                            "input_tokens": 0, "output_tokens": 0,
-                        },
-                    })
+                    await queue.put(
+                        {
+                            "type": "done",
+                            "conv_id": conv_id,
+                            "response": cached["response"],
+                            "intent": cached_intent,
+                            "agent_type": cached["agent_type"],
+                            "latency_ms": round((time.perf_counter() - request_started) * 1000, 1),
+                            "knowledge_used": bool(cached.get("knowledge_used", False)),
+                            "cached": True,
+                            "execution": {
+                                "mode": "cache",
+                                "profile": "cache",
+                                "classifier_stage": "cache",
+                                "complexity_reason": "语义缓存命中",
+                                "agents": [cached["agent_type"]],
+                                "tools": [],
+                                "tasks": [],
+                                "model": "",
+                                "trace_id": trace.trace_id,
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                            },
+                        }
+                    )
                     return
 
-                history = [
-                    {"role": m.role.value, "content": m.content}
-                    for m in mem_ctx.recent_messages[-5:]
-                ] if mem_ctx.recent_messages else None
+                history = (
+                    [{"role": m.role.value, "content": m.content} for m in mem_ctx.recent_messages[-5:]]
+                    if mem_ctx.recent_messages
+                    else None
+                )
 
                 orch_req = OrcReq(
                     message=req.message,
@@ -320,14 +365,17 @@ async def chat_stream(req: ChatRequest, request: Request = None):
                     from mcp.semantic_cache import cache_tier, classify_context_dependence
 
                     dep_write = classify_context_dependence(
-                        req.message, ctx_text,
+                        req.message,
+                        ctx_text,
                         domain=result.domain.value if result.domain else None,
                         action=result.action.value if result.action else None,
                     )
                     tier = cache_tier(dep_write, req.user_id)
                     if tier == "user":
-                        state._cache_put(state._semantic_cache,
-                            req.message, result.response,
+                        state._cache_put(
+                            state._semantic_cache,
+                            req.message,
+                            result.response,
                             domain=result.domain.value,
                             agent_type=result.agent_type,
                             user_id=req.user_id,
@@ -335,25 +383,29 @@ async def chat_stream(req: ChatRequest, request: Request = None):
                             knowledge_used="knowledge_search" in result.tools_used,
                         )
                     elif tier == "global":
-                        state._cache_put(state._semantic_cache,
-                            req.message, result.response,
+                        state._cache_put(
+                            state._semantic_cache,
+                            req.message,
+                            result.response,
                             domain=result.domain.value,
                             agent_type=result.agent_type,
                             dependence=dep_write,
                             knowledge_used="knowledge_search" in result.tools_used,
                         )
 
-                await queue.put({
-                    "type": "done",
-                    "conv_id": conv_id,
-                    "response": result.response,
-                    "intent": result.domain.value if result.domain else "other",
-                    "agent_type": result.agent_type,
-                    "latency_ms": round((time.perf_counter() - request_started) * 1000, 1),
-                    "knowledge_used": "knowledge_search" in result.tools_used,
-                    "cached": False,
-                    "execution": result.execution,
-                })
+                await queue.put(
+                    {
+                        "type": "done",
+                        "conv_id": conv_id,
+                        "response": result.response,
+                        "intent": result.domain.value if result.domain else "other",
+                        "agent_type": result.agent_type,
+                        "latency_ms": round((time.perf_counter() - request_started) * 1000, 1),
+                        "knowledge_used": "knowledge_search" in result.tools_used,
+                        "cached": False,
+                        "execution": result.execution,
+                    }
+                )
             except Exception as ex:
                 logger.exception("流式对话失败")
                 await queue.put({"type": "error", "message": str(ex)})

@@ -24,6 +24,7 @@
      通过 embed_query() / embed_documents() 显式区分两侧。
   4. 线程安全：onnxruntime session 可并发 run；懒加载用锁保护。
 """
+
 import logging
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.request
 
+import chromadb
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -46,18 +48,21 @@ QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 
 # 模型文件按优先级尝试（不同仓库提供的量化格式不同，取第一个存在的）
 _EMBEDDING_FILE_PRIORITY = (
-    "onnx/model.onnx", "onnx/model_fp16.onnx", "onnx/model_quantized.onnx",
+    "onnx/model.onnx",
+    "onnx/model_fp16.onnx",
+    "onnx/model_quantized.onnx",
 )
 _RERANK_FILE_PRIORITY = (
-    "onnx/model_fp16.onnx", "onnx/model_int8.onnx",
-    "onnx/model_uint8.onnx", "onnx/model.onnx",
+    "onnx/model_fp16.onnx",
+    "onnx/model_int8.onnx",
+    "onnx/model_uint8.onnx",
+    "onnx/model.onnx",
 )
 # tokenizer / 配置配套文件（tokenizer.json 必需，其余缺失不阻断）
-_TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json",
-                    "special_tokens_map.json", "config.json")
+_TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "config.json")
 
-_MAX_SEQ_LEN = 512          # bge 系列最大序列长度
-_RETRY_COOLDOWN_S = 300.0   # 加载失败后的冷却时间（避免每次调用都重试网络下载）
+_MAX_SEQ_LEN = 512  # bge 系列最大序列长度
+_RETRY_COOLDOWN_S = 300.0  # 加载失败后的冷却时间（避免每次调用都重试网络下载）
 _DOWNLOAD_TIMEOUT_S = 30.0  # 单文件下载超时（快速失败，不拖垮降级链路）
 
 
@@ -72,8 +77,7 @@ def _hf_base() -> str:
 
 def model_cache_dir() -> Path:
     """模型缓存目录（ECHOGUIDE_MODEL_CACHE_DIR，默认 ~/.cache/echoguide_models）。"""
-    path = Path(_env("ECHOGUIDE_MODEL_CACHE_DIR",
-                     str(Path.home() / ".cache" / "echoguide_models"))).expanduser()
+    path = Path(_env("ECHOGUIDE_MODEL_CACHE_DIR", str(Path.home() / ".cache" / "echoguide_models"))).expanduser()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -91,8 +95,7 @@ def _download_file(repo_id: str, filename: str, dest: Path) -> bool:
         # 首次下载时目标子目录（如 onnx/）可能不存在，缺了 open(.part) 直接失败
         tmp.parent.mkdir(parents=True, exist_ok=True)
         req = urllib.request.Request(url, headers={"User-Agent": "EchoGuide/1.0"})
-        with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_S) as resp, \
-                open(tmp, "wb") as out:
+        with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_S) as resp, open(tmp, "wb") as out:
             while True:
                 chunk = resp.read(65536)
                 if not chunk:
@@ -120,8 +123,7 @@ def _external_data_refs(onnx_path: Path) -> List[str]:
         data = onnx_path.read_bytes()
     except OSError:
         return []
-    return list(dict.fromkeys(
-        m.decode("utf-8") for m in re.findall(rb"[a-zA-Z0-9_\-\.]+\.onnx_data", data)))
+    return list(dict.fromkeys(m.decode("utf-8") for m in re.findall(rb"[a-zA-Z0-9_\-\.]+\.onnx_data", data)))
 
 
 def _ensure_model(repo_id: str, model_priority: List[str], cache_dir: Path) -> Path:
@@ -149,8 +151,7 @@ def _ensure_model(repo_id: str, model_priority: List[str], cache_dir: Path) -> P
         if ref_ok:
             return dest
         dest.unlink(missing_ok=True)  # data 缺失 → 主文件作废，避免缓存中毒
-    raise RuntimeError(
-        f"模型 {repo_id} 的 ONNX 文件均不可用（检查网络或 ECHOGUIDE_MODEL_CACHE_DIR）")
+    raise RuntimeError(f"模型 {repo_id} 的 ONNX 文件均不可用（检查网络或 ECHOGUIDE_MODEL_CACHE_DIR）")
 
 
 class _LoadedModel:
@@ -190,10 +191,12 @@ class _LoadedModel:
                 tokenizer = Tokenizer.from_file(str(tok_path))
                 tokenizer.enable_truncation(max_length=_MAX_SEQ_LEN)
                 tokenizer.enable_padding(
-                    pad_id=tokenizer.token_to_id("[PAD]") or 0, pad_token="[PAD]",
+                    pad_id=tokenizer.token_to_id("[PAD]") or 0,
+                    pad_token="[PAD]",
                 )
                 session = ort.InferenceSession(
-                    str(model_path), providers=["CPUExecutionProvider"],
+                    str(model_path),
+                    providers=["CPUExecutionProvider"],
                 )
                 self._session = session
                 self._tokenizer = tokenizer
@@ -203,8 +206,9 @@ class _LoadedModel:
             except Exception as ex:
                 self._session = None
                 self._error = str(ex)
-                logger.warning("本地模型 %s 加载失败（调用方将降级，%.0f 秒后重试）: %s",
-                               self._repo_id, _RETRY_COOLDOWN_S, ex)
+                logger.warning(
+                    "本地模型 %s 加载失败（调用方将降级，%.0f 秒后重试）: %s", self._repo_id, _RETRY_COOLDOWN_S, ex
+                )
                 return None
 
     def tokenize(self, texts: Any) -> Dict[str, np.ndarray]:
@@ -221,8 +225,7 @@ class _LoadedModel:
             "attention_mask": np.array([e.attention_mask for e in encodings], dtype=np.int64),
         }
         if any(inp.name == "token_type_ids" for inp in self._session.get_inputs()):
-            feeds["token_type_ids"] = np.array(
-                [e.type_ids for e in encodings], dtype=np.int64)
+            feeds["token_type_ids"] = np.array([e.type_ids for e in encodings], dtype=np.int64)
         return feeds
 
     def run(self, texts: Any) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
@@ -241,20 +244,33 @@ class _LoadedModel:
         return self._error
 
 
-class LocalEmbedder:
+class LocalEmbedder(chromadb.EmbeddingFunction):
     """bge-zh 系列 ONNX Embedding（mean pooling + L2 归一化）。
 
-    与 chromadb EmbeddingFunction 协议兼容（提供 __call__）：
+    chromadb 1.x EmbeddingFunction 协议：
       - chromadb collection 路径：__call__，前缀模式由 ECHOGUIDE_EMBED_PREFIX_MODE
-        决定（none=两侧都不加指令，both=两侧都加；默认 none —— 0.5.x 无法区分
-        query/document，BAAI 不建议给 passage 加指令）；
-      - 直连路径：embed_query() 带指令前缀 / embed_documents() 不带。
+        决定（none=两侧都不加指令，both=两侧都加；默认 none —— BAAI 不建议给
+        passage 加指令）；
+      - 直连路径：embed_query() 带指令前缀 / embed_documents() 不带；
+      - name()/get_config()/build_from_config()：chroma 1.x 会把 EF 配置随
+        collection 持久化并在 get_or_create 时校验，不再容忍无名的自定义 EF。
     """
 
     def __init__(self, model_name: Optional[str] = None, cache_dir: Optional[Path] = None):
         self._model_name = model_name or _env("ECHOGUIDE_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
         self._prefix_mode = _env("ECHOGUIDE_EMBED_PREFIX_MODE", "none").strip().lower()
         self._model = _LoadedModel(self._model_name, list(_EMBEDDING_FILE_PRIORITY), cache_dir)
+
+    @staticmethod
+    def name() -> str:
+        return "echoguide_local_bge"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"model": self._model_name, "prefix_mode": self._prefix_mode}
+
+    @classmethod
+    def build_from_config(cls, config: Dict[str, Any]):
+        return cls(model_name=config.get("model"))
 
     @property
     def available(self) -> bool:
@@ -269,7 +285,7 @@ class LocalEmbedder:
         if not texts:
             return []
         prepared = [QUERY_INSTRUCTION + t if is_query else t for t in texts]
-        hidden, feeds = self._model.run(prepared)                     # [batch, seq, hidden]
+        hidden, feeds = self._model.run(prepared)  # [batch, seq, hidden]
         mask_f = feeds["attention_mask"].astype(np.float32)[:, :, None]
         pooled = (hidden * mask_f).sum(axis=1) / mask_f.sum(axis=1).clip(min=1e-9)
         norm = np.linalg.norm(pooled, axis=1, keepdims=True).clip(min=1e-9)
@@ -289,8 +305,9 @@ class LocalEmbedder:
         return self.embed_texts(texts, is_query=False)
 
     def __call__(self, input: List[str]) -> List[List[float]]:
-        """chromadb EmbeddingFunction 协议入口（0.5.x 无法区分 query/document）。"""
-        return self.embed_texts(input, is_query=(self._prefix_mode == "both"))
+        """chromadb EmbeddingFunction 协议入口（1.x 以 list 传入 collection）。"""
+        vectors = self.embed_texts(input, is_query=(self._prefix_mode == "both"))
+        return [v.tolist() for v in vectors]
 
 
 class LocalReranker:

@@ -1,4 +1,5 @@
 """IT 领域：确定性故障诊断工具（公共工具层）。"""
+
 from __future__ import annotations
 
 import functools

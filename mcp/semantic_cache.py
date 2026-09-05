@@ -36,6 +36,7 @@
   精确缓存要求参数完全相同；语义缓存容忍近义改写（"选课什么时候开始？" ≈
   "选课几时开始？"）。
 """
+
 import asyncio
 import hashlib
 import logging
@@ -50,16 +51,16 @@ logger = logging.getLogger(__name__)
 
 # 语义缓存各 tier 的 collection 名（v4/v5 起使用 bge 中文向量空间；
 # 本地模型不可用时回退 v2/v3 的 MiniLM 空间，保证相似度分数语义一致）。
-COLLECTION_GLOBAL = "semantic_cache_global_v4"      # bge 空间（当前）
-COLLECTION_USER = "semantic_cache_user_v5"          # bge 空间（当前）
+COLLECTION_GLOBAL = "semantic_cache_global_v4"  # bge 空间（当前）
+COLLECTION_USER = "semantic_cache_user_v5"  # bge 空间（当前）
 PREVIOUS_COLLECTION_GLOBAL = "semantic_cache_global_v2"  # MiniLM 空间（回退）
-PREVIOUS_COLLECTION_USER = "semantic_cache_user_v3"     # MiniLM 空间（回退）
+PREVIOUS_COLLECTION_USER = "semantic_cache_user_v3"  # MiniLM 空间（回退）
 _COSINE_METADATA = {"hnsw:space": "cosine", "description": "EchoGuide semantic cache (cosine, bge)"}
 
 # 上下文依赖性三态
 DEP_GLOBAL = "global"  # 公共事实查询：答案不依赖上下文，可进 Global 层
-DEP_USER = "user"      # 依赖用户画像/身份但可复用，可进 User 层
-DEP_SKIP = "skip"      # 强上下文依赖：追问/省略句/指代/个人数据/状态改变，直接 bypass
+DEP_USER = "user"  # 依赖用户画像/身份但可复用，可进 User 层
+DEP_SKIP = "skip"  # 强上下文依赖：追问/省略句/指代/个人数据/状态改变，直接 bypass
 
 # 第一人称指代（"我们"单独剔除，避免"我们学校图书馆几点关门？"这类公共问题误判）
 _PRIVATE_PRONOUNS = ("我的", "俺", "咱", "我")
@@ -67,8 +68,19 @@ _PRIVATE_PRONOUNS = ("我的", "俺", "咱", "我")
 _DEICTIC_TOKENS = ("那", "这", "它")
 # 事实查询疑问词
 _QUESTION_WORDS = (
-    "几点", "怎么", "什么", "哪里", "哪儿", "如何", "在哪",
-    "多少", "是否", "有没有", "何时", "为什么", "怎样",
+    "几点",
+    "怎么",
+    "什么",
+    "哪里",
+    "哪儿",
+    "如何",
+    "在哪",
+    "多少",
+    "是否",
+    "有没有",
+    "何时",
+    "为什么",
+    "怎样",
 )
 
 
@@ -178,17 +190,15 @@ def _entry_id(query: str, user_id: Optional[str] = None) -> str:
         不同 user_id 互不覆盖。不再包含上下文指纹（User 层按语义匹配）。
     """
     if user_id:
-        return hashlib.md5(
-            f"{user_id}\x00{query}".encode()
-        ).hexdigest()
+        return hashlib.md5(f"{user_id}\x00{query}".encode()).hexdigest()
     return hashlib.md5(query.strip().encode("utf-8")).hexdigest()
 
 
 class SemanticCache:
     """基于 ChromaDB 的双层语义缓存（Global + User 隔离 + 上下文依赖性判定）。"""
 
-    DEFAULT_THRESHOLD = 0.85   # 相似度阈值：>= 命中即复用（0.9 命中率过低，实际形同虚设）
-    DEFAULT_TTL_S = 86400      # 缓存条目有效期 24h
+    DEFAULT_THRESHOLD = 0.85  # 相似度阈值：>= 命中即复用（0.9 命中率过低，实际形同虚设）
+    DEFAULT_TTL_S = 86400  # 缓存条目有效期 24h
 
     def __init__(
         self,
@@ -235,11 +245,37 @@ class SemanticCache:
 
         # 缓存不迁移：旧缓存的相似度阈值基于旧向量空间，冷启动可避免误命中。
         self._global = client.get_or_create_collection(
-            global_name, metadata=_COSINE_METADATA, embedding_function=embedding_function)
+            global_name, metadata=_COSINE_METADATA, embedding_function=embedding_function
+        )
         self._user = client.get_or_create_collection(
-            user_name, metadata=_COSINE_METADATA, embedding_function=embedding_function)
+            user_name, metadata=_COSINE_METADATA, embedding_function=embedding_function
+        )
 
     # ── 读写 ──────────────────────────────────────────────────────────────────
+
+    async def purge_expired(self) -> int:
+        """物理删除过期条目。
+
+        TTL 目前只在读取时懒判（get 命中过期返回 None 但条目仍在 collection），
+        collection 会无界膨胀、HNSW 持续变慢。条目 ts 以字符串存储，无法用
+        数值条件过滤，故全量读取后按 id 批删；启动/每日调用一次即可。
+        """
+        cutoff = time.time() - self.ttl_s
+
+        def _purge(collection) -> int:
+            data = collection.get(include=["metadatas"])
+            ids = data.get("ids") or []
+            metas = data.get("metadatas") or []
+            expired = [i for i, meta in zip(ids, metas, strict=False) if float((meta or {}).get("ts", 0)) <= cutoff]
+            if expired:
+                collection.delete(ids=expired)
+            return len(expired)
+
+        removed = await asyncio.to_thread(_purge, self._global)
+        removed += await asyncio.to_thread(_purge, self._user)
+        if removed:
+            logger.info("语义缓存清理过期条目 %d 条", removed)
+        return removed
 
     def get(self, query: str, user_id: Optional[str] = None, dependence: str = DEP_GLOBAL) -> Optional[Dict[str, Any]]:
         """
@@ -341,35 +377,41 @@ class SemanticCache:
                 self._user.upsert(
                     ids=[_entry_id(query, user_id=user_id)],
                     documents=[query.strip()],
-                    metadatas=[{
-                        "response": response,
-                        "domain": str(domain),
-                        "agent_type": str(agent_type),
-                        "user_id": str(user_id),
-                        "tier": "user",
-                        "ts": str(time.time()),
-                        "knowledge_used": bool(knowledge_used),
-                    }],
+                    metadatas=[
+                        {
+                            "response": response,
+                            "domain": str(domain),
+                            "agent_type": str(agent_type),
+                            "user_id": str(user_id),
+                            "tier": "user",
+                            "ts": str(time.time()),
+                            "knowledge_used": bool(knowledge_used),
+                        }
+                    ],
                 )
             elif tier == "global":
                 # Global 缓存：只收上下文无关的公共答案
                 self._global.upsert(
                     ids=[_entry_id(query)],
                     documents=[query.strip()],
-                    metadatas=[{
-                        "response": response,
-                        "domain": str(domain),
-                        "agent_type": str(agent_type),
-                        "tier": "global",
-                        "ts": str(time.time()),
-                        "knowledge_used": bool(knowledge_used),
-                    }],
+                    metadatas=[
+                        {
+                            "response": response,
+                            "domain": str(domain),
+                            "agent_type": str(agent_type),
+                            "tier": "global",
+                            "ts": str(time.time()),
+                            "knowledge_used": bool(knowledge_used),
+                        }
+                    ],
                 )
             # else: skip / 匿名 user → 静默跳过（强上下文依赖或身份不可用）
         except Exception as ex:
             logger.warning(f"语义缓存写入失败: {ex}")
 
-    async def aget(self, query: str, user_id: Optional[str] = None, dependence: str = DEP_GLOBAL) -> Optional[Dict[str, Any]]:
+    async def aget(
+        self, query: str, user_id: Optional[str] = None, dependence: str = DEP_GLOBAL
+    ) -> Optional[Dict[str, Any]]:
         """在线程池执行同步 Chroma 查询，避免阻塞 FastAPI 事件循环。"""
         return await asyncio.to_thread(self.get, query, user_id, dependence)
 

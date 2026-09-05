@@ -3,6 +3,7 @@
 
 只测确定性逻辑；LLM 路径用最小 mock 覆盖失败回退。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +20,7 @@ def _recognizer(**kwargs) -> IntentRecognizer:
 
 
 # ── 关键词命中（子串误命中回归）─────────────────────────────────────────────
+
 
 def test_ascii_keyword_requires_word_boundary():
     # EchoMind 经典缺陷："api" 命中 "capital"
@@ -45,6 +47,7 @@ def test_domain_hit_score_marks_domain():
 
 
 # ── 模式匹配（零 LLM 依赖）───────────────────────────────────────────────────
+
 
 def test_pattern_recognizes_campus_domains():
     rec = _recognizer()
@@ -117,14 +120,15 @@ def test_pattern_punctuation_false_positive_fixed():
 
 # ── 追问形态检测（防 Embedding 误判）────────────────────────────────────────
 
+
 def test_followup_shaped_detection():
     rec = _recognizer()
     # 强信号（指代承接）→ 无条件判追问，即使有 pattern 弱信号
     assert rec._is_followup_shaped("那几点开门呢？") is True
-    assert rec._is_followup_shaped("那选课呢？") is True          # pattern 弱命中 academic
-    assert rec._is_followup_shaped("最早一班呢？") is True     # "呢"结尾弱信号（无 pattern 信号）
+    assert rec._is_followup_shaped("那选课呢？") is True  # pattern 弱命中 academic
+    assert rec._is_followup_shaped("最早一班呢？") is True  # "呢"结尾弱信号（无 pattern 信号）
     assert rec._is_followup_shaped("最早一班呢？", True) is False  # 有主题词信号则不判
-    assert rec._is_followup_shaped("那几点上课？") is True        # 强信号"那"
+    assert rec._is_followup_shaped("那几点上课？") is True  # 强信号"那"
     # 弱信号（极短疑问词/呢结尾）→ 仅当 pattern 无信号
     assert rec._is_followup_shaped("几点？") is True
     assert rec._is_followup_shaped("什么时候？") is True
@@ -146,15 +150,21 @@ def test_followup_shaped_skips_embedding_goes_llm():
         raise AssertionError("追问形态不应走 Embedding")
 
     async def fake_llm(message, history, state=None):
-        return {"domain": IntentDomain.CAMPUS_LIFE, "action": IntentAction.QUERY,
-                "confidence": 0.9, "reasoning": "mock"}
+        return {
+            "domain": IntentDomain.CAMPUS_LIFE,
+            "action": IntentAction.QUERY,
+            "confidence": 0.9,
+            "reasoning": "mock",
+        }
 
     rec._embedding_recognize = embedding_should_not_run
     rec._llm_recognize = fake_llm
-    result = asyncio.run(rec.recognize(
-        "那几点开门呢？",
-        history=[{"role": "user", "content": "南校区食堂几点关门？"}],
-    ))
+    result = asyncio.run(
+        rec.recognize(
+            "那几点开门呢？",
+            history=[{"role": "user", "content": "南校区食堂几点关门？"}],
+        )
+    )
     assert result.domain == IntentDomain.CAMPUS_LIFE
     assert result.classifier_stage == "llm"
 
@@ -167,8 +177,13 @@ def test_weak_pattern_goes_directly_to_llm_without_embedding():
         raise AssertionError("弱 Pattern 不应先走 Embedding")
 
     async def fake_llm(message, history, state=None):
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.QUERY,
-                "domain_confidence": 0.90, "confidence": 0.90, "reasoning": "mock"}
+        return {
+            "domain": IntentDomain.ACADEMIC,
+            "action": IntentAction.QUERY,
+            "domain_confidence": 0.90,
+            "confidence": 0.90,
+            "reasoning": "mock",
+        }
 
     rec._embedding_recognize = embedding_should_not_run
     rec._llm_recognize = fake_llm
@@ -181,6 +196,7 @@ def test_weak_pattern_goes_directly_to_llm_without_embedding():
 
 # ── 缓存指纹（同句追问不同上下文不复用）──────────────────────────────────────
 
+
 def test_cache_key_includes_history_fingerprint():
     rec = _recognizer()
     k1 = rec._cache_key("那几点开门呢？", [{"role": "user", "content": "南校区食堂几点关门？"}])
@@ -192,13 +208,13 @@ def test_cache_key_includes_history_fingerprint():
 
 # ── 实体提取兜底 ─────────────────────────────────────────────────────────────
 
+
 def test_needs_knowledge_absent_on_pattern_path():
     """免费路径（pattern/embedding）不判定 needs_knowledge（未判定 → False）。"""
     rec = _recognizer()
 
     async def fake_embedding(message):
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER,
-                "confidence": 0.90, "margin": 0.3}
+        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER, "confidence": 0.90, "margin": 0.3}
 
     rec._embedding_recognize = fake_embedding
     result = asyncio.run(rec.recognize("选课成绩学分有什么规定？"))
@@ -207,6 +223,7 @@ def test_needs_knowledge_absent_on_pattern_path():
 
 
 # ── 在线学习 ─────────────────────────────────────────────────────────────────
+
 
 def test_learn_adds_template_and_invalidates_embedding_cache():
     rec = _recognizer()
@@ -219,6 +236,7 @@ def test_learn_adds_template_and_invalidates_embedding_cache():
 
 # ── 缓存统计 ─────────────────────────────────────────────────────────────────
 
+
 def test_cache_stats_before_any_request():
     rec = _recognizer()
     stats = rec.cache_stats
@@ -228,13 +246,13 @@ def test_cache_stats_before_any_request():
 
 # ── 级联分类 ─────────────────────────────────────────────────────────────────
 
+
 def test_cascade_pattern_skips_llm():
     """Pattern 高置信 + Embedding 同域、高分且 margin 达标 → 免费直返。"""
     rec = _recognizer()
 
     async def fake_embedding(message):
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER,
-                "confidence": 0.99, "margin": 0.5}
+        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER, "confidence": 0.99, "margin": 0.5}
 
     async def llm_should_not_run(message, history, complexity_only=False, state=None):
         raise AssertionError("双确认通过时不应调用 LLM")
@@ -256,8 +274,7 @@ def test_pattern_embedding_conflict_arbitrates_to_llm():
 
     async def fake_embedding(message):
         # "电子图书馆怎么登录？"被"图书馆"命中 campus_life，但 Embedding 判 it_help
-        return {"domain": IntentDomain.IT_HELP, "action": IntentAction.OTHER,
-                "confidence": 0.50, "margin": 0.10}
+        return {"domain": IntentDomain.IT_HELP, "action": IntentAction.OTHER, "confidence": 0.50, "margin": 0.10}
 
     async def fake_llm(message, history, state=None):
         return {"action": IntentAction.QUERY, "confidence": 0.9, "reasoning": "mock"}
@@ -266,7 +283,7 @@ def test_pattern_embedding_conflict_arbitrates_to_llm():
     rec._llm_recognize = fake_llm
     result = asyncio.run(rec.recognize("电子图书馆怎么登录？"))
     assert result.domain == IntentDomain.CAMPUS_LIFE  # 免费关键词回填（领域不做路由）
-    assert result.action == IntentAction.QUERY        # action 由 LLM 裁决
+    assert result.action == IntentAction.QUERY  # action 由 LLM 裁决
     assert result.classifier_stage == "llm"
 
 
@@ -281,12 +298,10 @@ def test_pattern_subthreshold_embedding_arbitrates_to_llm():
 
     async def fake_embedding(message):
         # 同方向（academic）但分数 0.50 < 0.80：方向一致不再是充分条件
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER,
-                "confidence": 0.50, "margin": 0.10}
+        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER, "confidence": 0.50, "margin": 0.10}
 
     async def fake_llm(message, history, state=None):
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.QUERY,
-                "confidence": 0.9, "reasoning": "mock"}
+        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.QUERY, "confidence": 0.9, "reasoning": "mock"}
 
     rec._embedding_recognize = fake_embedding
     rec._llm_recognize = fake_llm
@@ -301,12 +316,10 @@ def test_pattern_embedding_low_margin_arbitrates_to_llm():
     rec = _recognizer()
 
     async def fake_embedding(message):
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER,
-                "confidence": 0.90, "margin": 0.05}
+        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.OTHER, "confidence": 0.90, "margin": 0.05}
 
     async def fake_llm(message, history, state=None):
-        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.QUERY,
-                "confidence": 0.9, "reasoning": "mock"}
+        return {"domain": IntentDomain.ACADEMIC, "action": IntentAction.QUERY, "confidence": 0.9, "reasoning": "mock"}
 
     rec._embedding_recognize = fake_embedding
     rec._llm_recognize = fake_llm
@@ -323,8 +336,13 @@ def test_embedding_without_high_pattern_goes_directly_to_llm():
         raise AssertionError("Embedding 不应作为独立免费路径")
 
     async def fake_llm(message, history, state=None):
-        return {"domain": IntentDomain.IT_HELP, "action": IntentAction.QUERY,
-                "domain_confidence": 0.87, "confidence": 0.87, "reasoning": "mock"}
+        return {
+            "domain": IntentDomain.IT_HELP,
+            "action": IntentAction.QUERY,
+            "domain_confidence": 0.87,
+            "confidence": 0.87,
+            "reasoning": "mock",
+        }
 
     rec._embedding_recognize = embedding_should_not_run
     rec._llm_recognize = fake_llm

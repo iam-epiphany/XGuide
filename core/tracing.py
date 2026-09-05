@@ -14,6 +14,7 @@
   - IntentRecognizer.recognize：intent_recognize span
   - KnowledgeBase.search：kb_search span
 """
+
 from collections import OrderedDict
 from contextlib import asynccontextmanager, contextmanager
 import contextvars
@@ -25,8 +26,8 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-MAX_TRACES = 200          # 环形缓冲容量
-TRACE_TTL_S = 3600        # trace 保留时长
+MAX_TRACES = 200  # 环形缓冲容量
+TRACE_TTL_S = 3600  # trace 保留时长
 
 _current: contextvars.ContextVar = contextvars.ContextVar("echoguide_trace", default=None)
 

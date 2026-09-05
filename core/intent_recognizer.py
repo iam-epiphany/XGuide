@@ -35,6 +35,7 @@
 领域关键词的唯一来源在 core/domains.py，本模块与 Orchestrator、API 层共用，
 消除三处重复维护的漂移问题。
 """
+
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
@@ -60,66 +61,93 @@ logger = logging.getLogger(__name__)
 
 class IntentCategory(Enum):
     """兼容枚举：保留旧版语义（领域或动作），供 API / 评测 / 前端兼容使用。"""
-    QUERY      = "query"        # 信息查询
-    REQUEST    = "request"      # 请求操作
-    GREETING   = "greeting"     # 问候
-    COMPLAINT  = "complaint"    # 投诉不满
-    FEEDBACK   = "feedback"     # 正面反馈
+
+    QUERY = "query"  # 信息查询
+    REQUEST = "request"  # 请求操作
+    GREETING = "greeting"  # 问候
+    COMPLAINT = "complaint"  # 投诉不满
+    FEEDBACK = "feedback"  # 正面反馈
     # 西电校园场景的领域意图（兼容旧版路由）
-    ACADEMIC   = "academic"     # 学业支持
-    CAMPUS_LIFE = "campus_life" # 校园生活
-    AFFAIRS    = "affairs"      # 校务咨询
-    IT_HELP    = "it_help"      # IT 助手
-    PERSONAL   = "personal"     # 个人助理（课表/待办/日程）
-    OTHER      = "other"
+    ACADEMIC = "academic"  # 学业支持
+    CAMPUS_LIFE = "campus_life"  # 校园生活
+    AFFAIRS = "affairs"  # 校务咨询
+    IT_HELP = "it_help"  # IT 助手
+    PERSONAL = "personal"  # 个人助理（课表/待办/日程）
+    OTHER = "other"
 
 
 # 领域 → 兼容意图 的映射（旧版消费方只需要领域值）
 _DOMAIN_TO_CATEGORY = {
-    IntentDomain.ACADEMIC:    IntentCategory.ACADEMIC,
+    IntentDomain.ACADEMIC: IntentCategory.ACADEMIC,
     IntentDomain.CAMPUS_LIFE: IntentCategory.CAMPUS_LIFE,
-    IntentDomain.AFFAIRS:     IntentCategory.AFFAIRS,
-    IntentDomain.IT_HELP:     IntentCategory.IT_HELP,
-    IntentDomain.PERSONAL:    IntentCategory.PERSONAL,
+    IntentDomain.AFFAIRS: IntentCategory.AFFAIRS,
+    IntentDomain.IT_HELP: IntentCategory.IT_HELP,
+    IntentDomain.PERSONAL: IntentCategory.PERSONAL,
 }
 
 _ACTION_TO_CATEGORY = {
-    IntentAction.QUERY:     IntentCategory.QUERY,
-    IntentAction.REQUEST:   IntentCategory.REQUEST,
-    IntentAction.GREETING:  IntentCategory.GREETING,
+    IntentAction.QUERY: IntentCategory.QUERY,
+    IntentAction.REQUEST: IntentCategory.REQUEST,
+    IntentAction.GREETING: IntentCategory.GREETING,
     IntentAction.COMPLAINT: IntentCategory.COMPLAINT,
-    IntentAction.FEEDBACK:  IntentCategory.FEEDBACK,
+    IntentAction.FEEDBACK: IntentCategory.FEEDBACK,
 }
 
 
 @dataclass
 class IntentResult:
-    domain:     IntentDomain     # 领域（免费路径/历史回溯回填，仅用于人格挂载与观测）
-    action:     IntentAction     # 动作（行为依据：角色选择 + 写门禁）
-    intent:     IntentCategory   # 兼容字段（domain 优先，其次 action）
+    domain: IntentDomain  # 领域（免费路径/历史回溯回填，仅用于人格挂载与观测）
+    action: IntentAction  # 动作（行为依据：角色选择 + 写门禁）
+    intent: IntentCategory  # 兼容字段（domain 优先，其次 action）
     confidence: float
-    reasoning:  str
+    reasoning: str
     latency_ms: float
     classifier_stage: str = "llm"
-    needs_knowledge: bool = False                # 是否需要知识检索（Verifier 消费）
+    needs_knowledge: bool = False  # 是否需要知识检索（Verifier 消费）
 
 
 # ── Few-shot 模板 ─────────────────────────────────────────────────────────────
 # 领域模板：用于 LLM 示例与 Embedding 匹配；动作模板：用于 LLM 示例。
 _DOMAIN_TEMPLATES: Dict[IntentDomain, List[str]] = {
-    IntentDomain.ACADEMIC:    ["这学期选课什么时候开始？", "绩点怎么算的？", "重修怎么报名？", "保研有什么条件？", "培养方案学分要求是什么？"],
+    IntentDomain.ACADEMIC: [
+        "这学期选课什么时候开始？",
+        "绩点怎么算的？",
+        "重修怎么报名？",
+        "保研有什么条件？",
+        "培养方案学分要求是什么？",
+    ],
     IntentDomain.CAMPUS_LIFE: ["南校区食堂几点关门？", "校车最后一班几点？", "宿舍怎么报修？", "校园卡在哪充值？"],
-    IntentDomain.AFFAIRS:     ["奖学金什么时候评？", "请假流程怎么走？", "在读证明在哪开？", "学费缴费方式有哪些？", "我要请假怎么走流程", "校园卡丢了怎么补办？"],
-    IntentDomain.IT_HELP:     ["教务系统登录不上", "校园网连不上", "VPN怎么配置？", "学校邮箱收不到邮件"],
-    IntentDomain.PERSONAL:    ["今天有什么课？", "帮我查一下我的课表", "明天第几节在哪上课？", "这周周几没课？", "帮我记个待办，周三前交实验报告", "我最近的考试安排？", "还有什么没做完？"],
+    IntentDomain.AFFAIRS: [
+        "奖学金什么时候评？",
+        "请假流程怎么走？",
+        "在读证明在哪开？",
+        "学费缴费方式有哪些？",
+        "我要请假怎么走流程",
+        "校园卡丢了怎么补办？",
+    ],
+    IntentDomain.IT_HELP: ["教务系统登录不上", "校园网连不上", "VPN怎么配置？", "学校邮箱收不到邮件"],
+    IntentDomain.PERSONAL: [
+        "今天有什么课？",
+        "帮我查一下我的课表",
+        "明天第几节在哪上课？",
+        "这周周几没课？",
+        "帮我记个待办，周三前交实验报告",
+        "我最近的考试安排？",
+        "还有什么没做完？",
+    ],
 }
 
 _ACTION_TEMPLATES: Dict[IntentAction, List[str]] = {
-    IntentAction.QUERY:       ["西电校历这学期什么时候放假？", "图书馆几点开门？", "南校区快递站在哪？", "帮我查一下选课时间"],
-    IntentAction.REQUEST:     ["帮我添加一个补办校园卡的待办", "把这个待办标记完成", "记一下明天交实验报告"],
-    IntentAction.GREETING:    ["你好", "嗨", "在吗", "早上好"],
-    IntentAction.COMPLAINT:   ["宿舍热水一直不来！", "校车等了半小时还没来", "食堂排队太久了"],
-    IntentAction.FEEDBACK:    ["这个助手很实用！", "回答得很清楚，谢谢", "帮我大忙了"],
+    IntentAction.QUERY: [
+        "西电校历这学期什么时候放假？",
+        "图书馆几点开门？",
+        "南校区快递站在哪？",
+        "帮我查一下选课时间",
+    ],
+    IntentAction.REQUEST: ["帮我添加一个补办校园卡的待办", "把这个待办标记完成", "记一下明天交实验报告"],
+    IntentAction.GREETING: ["你好", "嗨", "在吗", "早上好"],
+    IntentAction.COMPLAINT: ["宿舍热水一直不来！", "校车等了半小时还没来", "食堂排队太久了"],
+    IntentAction.FEEDBACK: ["这个助手很实用！", "回答得很清楚，谢谢", "帮我大忙了"],
 }
 
 
@@ -133,8 +161,8 @@ def _cosine(a: List[float], b: List[float]) -> float:
         logger.warning(f"向量维度不一致（{len(a)} vs {len(b)}），跳过相似度计算")
         return 0.0
     dot = sum(x * y for x, y in zip(a, b, strict=False))
-    na  = sum(x * x for x in a) ** 0.5
-    nb  = sum(x * x for x in b) ** 0.5
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
     return dot / (na * nb) if na and nb else 0.0
 
 
@@ -155,35 +183,32 @@ class IntentRecognizer:
         embedding_threshold: float = 0.80,
         embedding_margin: float = 0.10,
         gateway: Optional[Any] = None,  # 统一模型调用入口（编排器注入；None 时直接调用）
-        ablation_mode: str = "full",    # 消融档位：full=完整级联 / pattern_only=仅关键词 / no_llm=免费路径（无 LLM 仲裁）
+        ablation_mode: str = "full",  # 消融档位：full=完整级联 / pattern_only=仅关键词 / no_llm=免费路径（无 LLM 仲裁）
     ):
         kwargs: Dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
-        self.client    = AsyncAnthropic(**kwargs)
-        self.model     = model
-        self._gateway  = gateway
+        self.client = AsyncAnthropic(**kwargs)
+        self.model = model
+        self._gateway = gateway
         # 阈值可用环境变量覆盖（ECHOGUIDE_INTENT_*）：有 LLM 兜底时阈值宁紧勿松——
         # 高阈值只是让"拿不准"的请求多付一次 LLM 调用，低阈值则会把低分误判静默
         # 落入错误领域（LLM 托底只保护漏判，不保护误判）。
         # 默认值按真实 bge 标定（probe_intent_thresholds.py）：同构嵌入下模板原文
         # 1.000、命中区最低 0.820、miss 区最高 0.655，0.80 在分离空档内且不误判；
         # 0.85 只会把"学费怎么交？"这类高频问句白送到 LLM。
-        self.pattern_threshold = float(
-            os.getenv("ECHOGUIDE_INTENT_PATTERN_THRESHOLD", str(pattern_threshold)))
-        self.embedding_threshold = float(
-            os.getenv("ECHOGUIDE_INTENT_EMBEDDING_THRESHOLD", str(embedding_threshold)))
-        self.embedding_margin = float(
-            os.getenv("ECHOGUIDE_INTENT_EMBEDDING_MARGIN", str(embedding_margin)))
+        self.pattern_threshold = float(os.getenv("ECHOGUIDE_INTENT_PATTERN_THRESHOLD", str(pattern_threshold)))
+        self.embedding_threshold = float(os.getenv("ECHOGUIDE_INTENT_EMBEDDING_THRESHOLD", str(embedding_threshold)))
+        self.embedding_margin = float(os.getenv("ECHOGUIDE_INTENT_EMBEDDING_MARGIN", str(embedding_margin)))
         # 真实 Embedding：本地 bge 中文模型（mcp.embeddings，与知识库 RAG 同源，
         # 模板走 embed_documents、用户消息走 embed_query 指令前缀）。
         # 模型不可用（如离线环境）时自动回退字符 n-gram 哈希向量，保证链路可用。
         self._embedding_enabled = True
-        self._embedder = None   # 惰性初始化（get_embedder 单例）
+        self._embedder = None  # 惰性初始化（get_embedder 单例）
 
         self._tpl_embeddings: Dict[IntentDomain, List[List[float]]] = {}
         self._cache: Dict[str, IntentResult] = {}
-        self.cache_hits   = 0
+        self.cache_hits = 0
         self.cache_misses = 0
 
         # 消融模式（评测专用，生产恒为 full）：pattern_only 与 no_llm 用于
@@ -242,9 +267,7 @@ class IntentRecognizer:
                     "action": pat.get("action").value if pat.get("action") else None,
                     "confidence": round(float(pat.get("confidence", 0.0)), 4),
                 }
-                _trace["is_followup"] = self._is_followup_shaped(
-                    message, pat.get("domain") != IntentDomain.OTHER
-                )
+                _trace["is_followup"] = self._is_followup_shaped(message, pat.get("domain") != IntentDomain.OTHER)
                 # Embedding 只用于与高置信 Pattern 的双确认。先写空值，避免
                 # 诊断 trace 改变正常分流（例如本应直接走 LLM 的追问/弱 Pattern
                 # 请求不应为了观测而额外调用 Embedding）。
@@ -278,10 +301,7 @@ class IntentRecognizer:
                 stage = "llm"
                 needs_knowledge = bool(llm.get("needs_knowledge", False))
                 domain = self._resolve_domain(llm, message, history)
-            elif (
-                pat.get("domain") != IntentDomain.OTHER
-                and pat.get("confidence", 0.0) >= self.pattern_threshold
-            ):
+            elif pat.get("domain") != IntentDomain.OTHER and pat.get("confidence", 0.0) >= self.pattern_threshold:
                 # Pattern 高置信 + 双确认：关键词子串可能误配（"电子图书馆怎么
                 # 登录？"被"图书馆"命中 campus_life 直返），Embedding 方向一致
                 # 且达到命中阈值（≥embedding_threshold）并拉开候选间隔
@@ -289,17 +309,23 @@ class IntentRecognizer:
                 # 0.80 是 bge 标定的命中区/未命中区分隔线（probe_intent_thresholds.py：
                 # 命中区最低 0.820、miss 区最高 0.655）：低于它即使方向一致也只是
                 # 噪声级巧合，不能算"双确认"（宁多花钱不误判）。
-                emb = await self._embedding_recognize(message) if self._embedding_enabled else {
-                    "domain": IntentDomain.OTHER,
-                    "action": IntentAction.OTHER,
-                    "confidence": 0.0,
-                    "margin": 0.0,
-                }
+                emb = (
+                    await self._embedding_recognize(message)
+                    if self._embedding_enabled
+                    else {
+                        "domain": IntentDomain.OTHER,
+                        "action": IntentAction.OTHER,
+                        "confidence": 0.0,
+                        "margin": 0.0,
+                    }
+                )
                 if _trace is not None and emb.get("domain") != IntentDomain.OTHER:
-                    candidates = emb.get("candidates") or [{
-                        "domain": emb["domain"],
-                        "score": emb.get("confidence", 0.0),
-                    }]
+                    candidates = emb.get("candidates") or [
+                        {
+                            "domain": emb["domain"],
+                            "score": emb.get("confidence", 0.0),
+                        }
+                    ]
                     _trace["embedding_candidates"] = [
                         {"domain": candidate["domain"].value, "score": round(float(candidate["score"]), 4)}
                         for candidate in candidates
@@ -317,13 +343,10 @@ class IntentRecognizer:
                     action = llm.get("action", action)
                     confidence = float(llm.get("confidence", 0.0))
                     if emb.get("domain") != pat["domain"]:
-                        reason_detail = (
-                            f"关键词与 Embedding 分歧（{emb.get('domain') or '未命中'}）"
-                        )
+                        reason_detail = f"关键词与 Embedding 分歧（{emb.get('domain') or '未命中'}）"
                     elif emb.get("confidence", 0.0) < self.embedding_threshold:
                         reason_detail = (
-                            f"Embedding 同向但分数 {emb.get('confidence', 0.0):.2f} "
-                            f"低于阈值 {self.embedding_threshold}"
+                            f"Embedding 同向但分数 {emb.get('confidence', 0.0):.2f} 低于阈值 {self.embedding_threshold}"
                         )
                     else:
                         reason_detail = (
@@ -394,10 +417,16 @@ class IntentRecognizer:
         domain, action = IntentDomain.OTHER, pat["action"]
         reasoning = "ablation:no_llm（未通过双确认，无 LLM 兜底）"
         stage = "no_match"
-        emb = await self._embedding_recognize(message) if self._embedding_enabled else {
-            "domain": IntentDomain.OTHER, "action": IntentAction.OTHER,
-            "confidence": 0.0, "margin": 0.0,
-        }
+        emb = (
+            await self._embedding_recognize(message)
+            if self._embedding_enabled
+            else {
+                "domain": IntentDomain.OTHER,
+                "action": IntentAction.OTHER,
+                "confidence": 0.0,
+                "margin": 0.0,
+            }
+        )
         if (
             pat["domain"] != IntentDomain.OTHER
             and pat["confidence"] >= self.pattern_threshold
@@ -497,9 +526,7 @@ class IntentRecognizer:
         examples_text = "\n".join(action_examples[:12])
 
         domain_defs = "\n".join(
-            f"- {d.value}: {_DOMAIN_TEMPLATES[d][0]}"
-            for d in IntentDomain
-            if d != IntentDomain.OTHER
+            f"- {d.value}: {_DOMAIN_TEMPLATES[d][0]}" for d in IntentDomain if d != IntentDomain.OTHER
         )
 
         # 领域边界说明（错误分析补强：affairs/academic 的"教务"常识混淆、
@@ -587,9 +614,7 @@ class IntentRecognizer:
                 "failed": True,
             }
 
-    async def _embedding_candidates(
-        self, message: str, top_n: int = 3
-    ) -> List[tuple[float, IntentDomain]]:
+    async def _embedding_candidates(self, message: str, top_n: int = 3) -> List[tuple[float, IntentDomain]]:
         """按模板相似度降序返回 Top-N 领域候选（(score, domain)）。
 
         供 _embedding_recognize 与路由 trace（评测错误分析）共用：
@@ -622,10 +647,7 @@ class IntentRecognizer:
                 "action": IntentAction.OTHER,
                 "confidence": best_score,
                 "margin": max(0.0, best_score - second_score),
-                "candidates": [
-                    {"domain": domain, "score": score}
-                    for score, domain in cands
-                ],
+                "candidates": [{"domain": domain, "score": score} for score, domain in cands],
             }
         except Exception as ex:
             logger.warning(f"Embedding 识别失败: {ex}")
@@ -706,7 +728,7 @@ class IntentRecognizer:
         idx = 0
         for domain in missing:
             n = len(_DOMAIN_TEMPLATES[domain])
-            self._tpl_embeddings[domain] = vecs[idx: idx + n]
+            self._tpl_embeddings[domain] = vecs[idx : idx + n]
             idx += n
 
     async def _embed_text(self, text: str, *, is_query: bool = False) -> List[float]:
@@ -733,8 +755,7 @@ class IntentRecognizer:
                     self._embedding_enabled = False
             if self._embedder is not None:
                 try:
-                    embed = (self._embedder.embed_query if is_query
-                             else self._embedder.embed_documents)
+                    embed = self._embedder.embed_query if is_query else self._embedder.embed_documents
                     vec = await asyncio.to_thread(embed, [text])
                     return [float(x) for x in vec[0]]
                 except Exception as ex:
@@ -751,7 +772,7 @@ class IntentRecognizer:
         tokens = set()
         for n in (1, 2, 3):
             if len(normalized) >= n:
-                tokens.update(normalized[i:i + n] for i in range(len(normalized) - n + 1))
+                tokens.update(normalized[i : i + n] for i in range(len(normalized) - n + 1))
         if not tokens:
             tokens.add(normalized)
 
@@ -778,10 +799,7 @@ class IntentRecognizer:
         """
         fp = ""
         if history:
-            tail = "|".join(
-                f"{m.get('role', '')}:{self._clean_text(m.get('content', ''))}"
-                for m in history[-3:]
-            )
+            tail = "|".join(f"{m.get('role', '')}:{self._clean_text(m.get('content', ''))}" for m in history[-3:])
             fp = hashlib.md5(tail.encode("utf-8")).hexdigest()[:8]
         return f"{self._clean_text(message)[:200]}#{fp}"
 

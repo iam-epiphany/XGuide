@@ -2,6 +2,7 @@
 
 全部使用临时 SQLite 数据库（tmp_path），不触发 LLM、不污染真实数据。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,12 +52,13 @@ def _service(tmp_path) -> PersonalService:
 
 # ── ICS 解析 ──────────────────────────────────────────────────────────────────
 
+
 def test_ics_parse_weekly_recurrence():
     courses = parse_ics(SAMPLE_ICS, SEMESTER_START, semester_weeks=19)
     assert len(courses) == 2
 
     math = next(c for c in courses if c.course == "高等数学A")
-    assert math.day_of_week == 0            # 周一
+    assert math.day_of_week == 0  # 周一
     assert math.start_time == "08:30"
     assert math.end_time == "10:05"
     assert math.location == "南校区B栋101"
@@ -153,6 +155,7 @@ def test_courses_on_vacation_returns_week_zero(tmp_path):
 
 # ── 教学周工具 ────────────────────────────────────────────────────────────────
 
+
 def test_weeks_compress_and_expand_roundtrip():
     weeks = [1, 2, 3, 5, 6, 7, 9]
     expr = compress_weeks(weeks)
@@ -170,13 +173,14 @@ def test_week_in_empty_means_all():
 
 # ── 日期表达式 ────────────────────────────────────────────────────────────────
 
+
 def test_parse_date_expr():
     today = date(2026, 9, 9)  # 周三
     assert parse_date_expr("今天", today) == today
     assert parse_date_expr("明天", today) == date(2026, 9, 10)
     assert parse_date_expr("昨天", today) == date(2026, 9, 8)
     assert parse_date_expr("周三", today) == today
-    assert parse_date_expr("周一", today) == date(2026, 9, 7)   # 本周一（已过）
+    assert parse_date_expr("周一", today) == date(2026, 9, 7)  # 本周一（已过）
     assert parse_date_expr("周五", today) == date(2026, 9, 11)  # 本周五（未到）
     assert parse_date_expr("2026-09-14", today) == date(2026, 9, 14)
     assert parse_date_expr("10月1日", today) == date(2026, 10, 1)
@@ -187,11 +191,18 @@ def test_parse_date_expr():
 
 # ── 存储与用户隔离 ────────────────────────────────────────────────────────────
 
+
 def test_store_schedule_crud(tmp_path):
     store = PersonalStore(db_path=str(tmp_path / "t.db"))
     courses = [
-        {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05",
-         "location": "B-101", "weeks": "1-16"},
+        {
+            "course": "高数",
+            "day_of_week": 0,
+            "start_time": "08:30",
+            "end_time": "10:05",
+            "location": "B-101",
+            "weeks": "1-16",
+        },
     ]
     asyncio.run(store.replace_schedule("u1", courses))
     rows = asyncio.run(store.get_schedule("u1"))
@@ -205,12 +216,22 @@ def test_store_schedule_crud(tmp_path):
 
 def test_store_user_isolation(tmp_path):
     store = PersonalStore(db_path=str(tmp_path / "t.db"))
-    asyncio.run(store.replace_schedule("u1", [
-        {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05", "weeks": ""},
-    ]))
-    asyncio.run(store.replace_schedule("u2", [
-        {"course": "英语", "day_of_week": 2, "start_time": "10:25", "end_time": "12:00", "weeks": ""},
-    ]))
+    asyncio.run(
+        store.replace_schedule(
+            "u1",
+            [
+                {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05", "weeks": ""},
+            ],
+        )
+    )
+    asyncio.run(
+        store.replace_schedule(
+            "u2",
+            [
+                {"course": "英语", "day_of_week": 2, "start_time": "10:25", "end_time": "12:00", "weeks": ""},
+            ],
+        )
+    )
     u1 = asyncio.run(store.get_schedule("u1"))
     u2 = asyncio.run(store.get_schedule("u2"))
     assert [c["course"] for c in u1] == ["高数"]
@@ -237,16 +258,34 @@ def test_todo_crud_and_done(tmp_path):
 
 # ── 查询服务 ──────────────────────────────────────────────────────────────────
 
+
 def test_courses_on_respects_weeks(tmp_path):
     service = _service(tmp_path)
-    asyncio.run(service.import_courses("u1", [
-        # 第 1-16 周的周一高数
-        {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05",
-         "location": "B-101", "weeks": list(range(1, 17))},
-        # 第 3-16 周的周一体育（第 1、2 周不上）
-        {"course": "体育", "day_of_week": 0, "start_time": "14:00", "end_time": "15:35",
-         "location": "田径场", "weeks": list(range(3, 17))},
-    ]))
+    asyncio.run(
+        service.import_courses(
+            "u1",
+            [
+                # 第 1-16 周的周一高数
+                {
+                    "course": "高数",
+                    "day_of_week": 0,
+                    "start_time": "08:30",
+                    "end_time": "10:05",
+                    "location": "B-101",
+                    "weeks": list(range(1, 17)),
+                },
+                # 第 3-16 周的周一体育（第 1、2 周不上）
+                {
+                    "course": "体育",
+                    "day_of_week": 0,
+                    "start_time": "14:00",
+                    "end_time": "15:35",
+                    "location": "田径场",
+                    "weeks": list(range(3, 17)),
+                },
+            ],
+        )
+    )
     # 第 1 周（2026-09-07 周一）：只有高数
     w1 = asyncio.run(service.courses_on("u1", "2026-09-07"))
     assert [c["course"] for c in w1["courses"]] == ["高数"]
@@ -283,9 +322,14 @@ def test_upcoming_days_left(tmp_path):
 def test_overview_aggregates(tmp_path):
     service = _service(tmp_path)
     today = date(2026, 9, 7)  # 周一，第 1 周
-    asyncio.run(service.import_courses("u1", [
-        {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05", "weeks": "1-16"},
-    ]))
+    asyncio.run(
+        service.import_courses(
+            "u1",
+            [
+                {"course": "高数", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05", "weeks": "1-16"},
+            ],
+        )
+    )
     asyncio.run(service.add_todo("u1", "取快递", kind="todo"))
     asyncio.run(service.add_todo("u1", "高数期中", kind="exam", due_at="2026-09-14"))
 

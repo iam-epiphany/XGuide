@@ -33,6 +33,7 @@ Embedding 模型（v3 起）：
   - PDF 等文档经 anydoc 转为 Markdown 入库（结构保留）；旧版 pypdf 解析的
     page_offsets（页码区间标注）仍兼容，见 add_documents
 """
+
 import asyncio
 import bisect
 import hashlib
@@ -135,9 +136,9 @@ class KnowledgeBase:
 
     # v3 显式使用 cosine + bge 中文向量。旧 collection 的距离空间/向量维度与
     # 新模型不兼容，不能混查；首次启动把旧文档重新写入 v3 以重新生成索引。
-    COLLECTION_NAME = "knowledge_base_v3"               # bge-small-zh-v1.5（当前）
-    PREVIOUS_COLLECTION_NAME = "knowledge_base_v2"      # MiniLM cosine（回退/迁移源）
-    LEGACY_COLLECTION_NAME = "knowledge_base"           # 最早期 L2 空间（迁移源）
+    COLLECTION_NAME = "knowledge_base_v3"  # bge-small-zh-v1.5（当前）
+    PREVIOUS_COLLECTION_NAME = "knowledge_base_v2"  # MiniLM cosine（回退/迁移源）
+    LEGACY_COLLECTION_NAME = "knowledge_base"  # 最早期 L2 空间（迁移源）
     COLLECTION_METADATA = {
         "hnsw:space": "cosine",
         "description": "西电校园知识库（EchoGuide RAG，cosine，bge）",
@@ -145,10 +146,20 @@ class KnowledgeBase:
 
     # 标题 → 领域 的粗粒度映射（导入时写入 metadata，供检索按领域过滤）
     TITLE_DOMAIN_MAP = {
-        "校历": "affairs", "选课": "academic", "奖学金": "affairs", "请假": "affairs",
-        "穿梭车": "campus_life", "校车": "campus_life", "食堂": "campus_life",
-        "餐饮": "campus_life", "宿舍": "campus_life", "图书馆": "campus_life",
-        "教务系统": "it_help", "校园网": "it_help", "vpn": "it_help", "邮箱": "it_help",
+        "校历": "affairs",
+        "选课": "academic",
+        "奖学金": "affairs",
+        "请假": "affairs",
+        "穿梭车": "campus_life",
+        "校车": "campus_life",
+        "食堂": "campus_life",
+        "餐饮": "campus_life",
+        "宿舍": "campus_life",
+        "图书馆": "campus_life",
+        "教务系统": "it_help",
+        "校园网": "it_help",
+        "vpn": "it_help",
+        "邮箱": "it_help",
     }
 
     def __init__(
@@ -180,8 +191,7 @@ class KnowledgeBase:
         # 向量空间随 collection 名绑定，任何路径都不会混写两种模型的向量。
         self._embedding_function = get_embedder()
         self._collection_name = (
-            self.COLLECTION_NAME if self._embedding_function is not None
-            else self.PREVIOUS_COLLECTION_NAME
+            self.COLLECTION_NAME if self._embedding_function is not None else self.PREVIOUS_COLLECTION_NAME
         )
         if self._embedding_function is None:
             logger.warning(
@@ -226,12 +236,13 @@ class KnowledgeBase:
         （新版 anydoc 解析不再产出该字段，此分支向后兼容保留。）
         """
         ids, docs, metas = [], [], []
+        doc_keys: List[str] = []
 
         for doc in documents:
-            title   = doc.get("title", "")
+            title = doc.get("title", "")
             content = doc.get("content", "")
-            domain  = doc.get("domain") or self._infer_domain(title)
-            fmt     = str(doc.get("format") or "text")
+            domain = doc.get("domain") or self._infer_domain(title)
+            fmt = str(doc.get("format") or "text")
             page_offsets = doc.get("page_offsets") or []
 
             if page_offsets:
@@ -239,11 +250,18 @@ class KnowledgeBase:
             else:
                 chunks = [(c, None, None) for c in self._chunk_text(content)]
 
+            # 文档键只由标题决定（标题是本知识库的事实唯一键），分块 id = key:序号。
+            # 旧方案把分块序号和内容前缀揉进 id：文档更新后分块数变化时旧切片的 id
+            # 不再被覆盖，永远残留索引被检索命中（过期知识）；不同文档同名也会互相
+            # 覆盖。新方案配合导入前的按键删除，实现真正的幂等更新。
+            doc_key = hashlib.md5(title.encode("utf-8")).hexdigest()
+            doc_keys.append(doc_key)
+
             for i, (chunk, page_start, page_end) in enumerate(chunks):
-                doc_id = hashlib.md5(f"{title}_{i}_{chunk[:50]}".encode()).hexdigest()
-                ids.append(doc_id)
+                ids.append(f"{doc_key}:{i}")
                 docs.append(chunk)
                 meta = {
+                    "doc_key": doc_key,
                     "title": title,
                     "chunk_index": i,
                     "total_chunks": len(chunks),
@@ -262,6 +280,11 @@ class KnowledgeBase:
                 metas.append(meta)
 
         if ids:
+            # 先按文档键删除旧版本切片（幂等更新的关键一步），再整体写入
+            try:
+                self._collection.delete(where={"doc_key": {"$in": doc_keys}})
+            except Exception as ex:
+                logger.warning("按 doc_key 清理旧切片失败（继续写入，可能残留旧分块）: %s", ex)
             # ChromaDB 会自动生成 Embedding；但 chroma 0.5.x 在本地
             # PersistentClient 路径下对 ndarray 型 embedding 执行
             # `embeddings == []` 判空（numpy 广播崩溃，公开知识导入失败的
@@ -312,29 +335,32 @@ class KnowledgeBase:
             for doc, meta, dist in zip(
                 results["documents"][0],
                 results["metadatas"][0],
-                results["distances"][0], strict=False,
+                results["distances"][0],
+                strict=False,
             ):
                 # cosine 距离的定义为 1-cosine_similarity；显式配置 collection
                 # 后该换算才成立。为应对数值误差夹紧到 [0, 1]。
                 score = round(max(0.0, min(1.0, 1.0 - float(dist))), 4)
                 if score < min_score:
                     continue  # 相关性阈值过滤
-                items.append({
-                    "title":    meta.get("title", ""),
-                    "content":  doc,
-                    "score":    score,
-                    "chunk":    meta.get("chunk_index", 0),
-                    "domain":   meta.get("domain", "general"),
-                    "format":   meta.get("format", "text"),
-                    "page_start": meta.get("page_start", ""),
-                    "page_end":   meta.get("page_end", ""),
-                    "source_url": meta.get("source_url", ""),
-                    "updated_at": meta.get("updated_at", ""),
-                    "valid_from": meta.get("valid_from", ""),
-                    "source_status": meta.get("source_status", "unverified"),
-                    "version": meta.get("version", ""),
-                    "scope": meta.get("scope", ""),
-                })
+                items.append(
+                    {
+                        "title": meta.get("title", ""),
+                        "content": doc,
+                        "score": score,
+                        "chunk": meta.get("chunk_index", 0),
+                        "domain": meta.get("domain", "general"),
+                        "format": meta.get("format", "text"),
+                        "page_start": meta.get("page_start", ""),
+                        "page_end": meta.get("page_end", ""),
+                        "source_url": meta.get("source_url", ""),
+                        "updated_at": meta.get("updated_at", ""),
+                        "valid_from": meta.get("valid_from", ""),
+                        "source_status": meta.get("source_status", "unverified"),
+                        "version": meta.get("version", ""),
+                        "scope": meta.get("scope", ""),
+                    }
+                )
 
         return items
 
@@ -359,7 +385,11 @@ class KnowledgeBase:
         min_score = params.get("min_score", 0.25)
         domain = params.get("domain")  # Agent 可传当前领域做过滤
         return await asyncio.to_thread(
-            self.search, query, top_k=top_k, min_score=min_score, domain=domain,
+            self.search,
+            query,
+            top_k=top_k,
+            min_score=min_score,
+            domain=domain,
         )
 
     def _migrate_previous_collections(self) -> None:
@@ -395,8 +425,7 @@ class KnowledgeBase:
             metas = records.get("metadatas") or []
             if ids and docs:
                 self._collection.upsert(ids=ids, documents=docs, metadatas=metas)
-                logger.info("知识库已从 %s 重新索引 %d 个片段到 %s",
-                            source, len(ids), self._collection_name)
+                logger.info("知识库已从 %s 重新索引 %d 个片段到 %s", source, len(ids), self._collection_name)
                 return True
         except Exception as ex:
             logger.debug("未迁移 %s（可忽略）: %s", source, ex)
@@ -502,10 +531,10 @@ class KnowledgeBase:
         - table / code 原子单元整体成块（不参与合并，不做 overlap）
         """
         chunks: List[str] = []
-        chain: List[Tuple[int, str]] = []   # (标题级别, 去井号标题)
-        pend: List[str] = []                # 当前块正文（段落列表）
-        buf_head = ""                       # 当前块的标题链
-        last_tail = ""                      # 上一块正文尾部 overlap 字
+        chain: List[Tuple[int, str]] = []  # (标题级别, 去井号标题)
+        pend: List[str] = []  # 当前块正文（段落列表）
+        buf_head = ""  # 当前块的标题链
+        last_tail = ""  # 上一块正文尾部 overlap 字
 
         def head_text() -> str:
             return " > ".join(title for _, title in chain)
@@ -553,14 +582,12 @@ class KnowledgeBase:
                     pend = [last_tail + "\n\n" + unit]
                     last_tail = ""
                     continue
-                emit_atomic(last_tail)   # overlap 尾巴单独成块（不丢内容）
+                emit_atomic(last_tail)  # overlap 尾巴单独成块（不丢内容）
                 last_tail = ""
 
             if len(unit) > effective:
                 # 超长段落：递归拆分（带 overlap），每片独立成块
-                for sub, _, _ in self._split_recursive(
-                    unit, self._CHUNK_SEPARATORS, effective, overlap
-                ):
+                for sub, _, _ in self._split_recursive(unit, self._CHUNK_SEPARATORS, effective, overlap):
                     chunks.append(f"{buf_head}\n{sub}" if buf_head else sub)
             else:
                 pend = [unit]
@@ -619,7 +646,9 @@ class KnowledgeBase:
         sep = separators[0]
         if sep == "":
             # 字符级硬切分兜底（全角文本无任何可拆分隔符时使用）
-            return [(text[i:i + chunk_size], base + i, base + i + chunk_size) for i in range(0, len(text), chunk_size)]
+            return [
+                (text[i : i + chunk_size], base + i, base + i + chunk_size) for i in range(0, len(text), chunk_size)
+            ]
 
         spans: List[Tuple[int, int]] = []
         pos, start = 0, 0

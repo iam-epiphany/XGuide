@@ -14,10 +14,12 @@
   5. /chat 与 /chat/stream 行为一致；
   6. 写入侧叠加编排信号（personal/history/request → skip 不落库）。
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
+from types import SimpleNamespace
 
 from mcp.semantic_cache import (
     SemanticCache,
@@ -28,6 +30,7 @@ from mcp.semantic_cache import (
 )
 
 # ── 上下文依赖性判定 ────────────────────────────────────────────────────────
+
 
 def test_classify_short_followup_with_deictic_skips():
     """含指代词的短追问 → skip（答案依赖上文话题，且优先于第一人称/疑问句式）。"""
@@ -50,13 +53,13 @@ def test_classify_ellipsis_skips():
 
 
 def test_classify_ma_not_a_followup_signal():
-    """"吗"不是追问信号：完整疑问句按事实查询走 Global。"""
+    """ "吗"不是追问信号：完整疑问句按事实查询走 Global。"""
     assert classify_context_dependence("图书馆几点关门吗？", ctx_text="[用户画像]") == "global"
 
 
 def test_classify_first_person_goes_user():
     """第一人称指代 → user（答案依赖用户画像），且"我们学校…"不误伤。"""
-    ctx = "[用户画像]\n{\"preferences\": [\"清淡\"]}"
+    ctx = '[用户画像]\n{"preferences": ["清淡"]}'
     assert classify_context_dependence("我适合什么选修课？", ctx_text=ctx) == "user"
     assert classify_context_dependence("我的课表几点更新？", ctx_text=ctx) == "user"
     assert classify_context_dependence("推荐一下食堂", ctx_text=ctx) == "user"
@@ -98,6 +101,7 @@ def test_classify_empty_message_skips():
 
 # ── tier 纯映射 ─────────────────────────────────────────────────────────────
 
+
 def test_cache_tier_pure_mapping():
     """cache_tier 只做三态 → 写入层映射，不重复判断 domain/action。"""
     assert cache_tier("global", None) == "global"
@@ -136,6 +140,7 @@ def test_entry_id_isolation_between_users():
 
 
 # ── SemanticCache 行为（FakeCollection 只做 where 过滤）──────────────────────
+
 
 class _FakeCollection:
     """最小 ChromaDB collection 替身：只按 where 过滤，距离固定 0.0（相似度 1.0）。"""
@@ -186,9 +191,21 @@ def _cache():
 
 def test_user_cache_cross_user_isolation():
     """P0-3：同 query + 不同 user_id 独立并存，互不覆盖、互不命中。"""
-    cache, g, user = _cache()
-    cache.put("推荐一下食堂", "用户A的个性化回答（偏好清淡，推荐一食堂）", domain="campus_life", user_id="A", dependence="user")
-    cache.put("推荐一下食堂", "用户B的个性化回答（偏好无辣，推荐二食堂）", domain="campus_life", user_id="B", dependence="user")
+    cache, _g, user = _cache()
+    cache.put(
+        "推荐一下食堂",
+        "用户A的个性化回答（偏好清淡，推荐一食堂）",
+        domain="campus_life",
+        user_id="A",
+        dependence="user",
+    )
+    cache.put(
+        "推荐一下食堂",
+        "用户B的个性化回答（偏好无辣，推荐二食堂）",
+        domain="campus_life",
+        user_id="B",
+        dependence="user",
+    )
 
     # 两条独立记录（upsert 未覆盖）
     assert len(user.entries) == 2
@@ -203,8 +220,14 @@ def test_user_cache_cross_user_isolation():
 
 def test_user_cache_hit_ignores_context_change():
     """User 层不再按上下文指纹硬隔离：同一用户画像/历史变化后，相同问题仍可语义命中。"""
-    cache, g, user = _cache()
-    cache.put("推荐一下食堂", "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。", domain="campus_life", user_id="A", dependence="user")
+    cache, _g, _user = _cache()
+    cache.put(
+        "推荐一下食堂",
+        "推荐一食堂（偏好清淡），午餐人较少，建议错峰就餐。",
+        domain="campus_life",
+        user_id="A",
+        dependence="user",
+    )
     # 无 where 之外的指纹过滤，同用户重复查询直接命中
     hit = cache.get("推荐一下食堂", user_id="A", dependence="user")
     assert hit
@@ -217,7 +240,7 @@ def test_user_cache_hit_ignores_context_change():
 
 def test_skip_read_counts_bypass_not_miss():
     """P0-2：强上下文依赖（skip）读取 → 计 bypass，不计入 miss（不影响 hit_rate）。"""
-    cache, g, user = _cache()
+    cache, _g, _user = _cache()
     for _ in range(3):
         assert cache.get("那几点开门？", user_id="u1", dependence="skip") is None
     assert cache._bypass == 3
@@ -228,15 +251,23 @@ def test_skip_read_counts_bypass_not_miss():
 def test_skip_write_silently_skipped():
     """skip 写入 → 静默跳过（不入 Global/User，也不打 warning）。"""
     cache, g, user = _cache()
-    cache.put("那几点开门？", "食堂 7:00 开门，早餐时段人较少，建议错峰就餐。", domain="campus_life", user_id="123", dependence="skip")
+    cache.put(
+        "那几点开门？",
+        "食堂 7:00 开门，早餐时段人较少，建议错峰就餐。",
+        domain="campus_life",
+        user_id="123",
+        dependence="skip",
+    )
     assert len(g.entries) == 0
     assert len(user.entries) == 0
 
 
 def test_user_tier_never_falls_back_to_global():
     """P0-4：user 层请求（依赖用户画像）Global 命中也不复用（不绕过个性化推理）。"""
-    cache, g, user = _cache()
-    cache.put("南校区食堂几点关门？", "公共答案：南校区食堂一般 22:00 关门。", domain="campus_life", dependence="global")
+    cache, _g, _user = _cache()
+    cache.put(
+        "南校区食堂几点关门？", "公共答案：南校区食堂一般 22:00 关门。", domain="campus_life", dependence="global"
+    )
 
     # global → 读 Global 命中
     assert cache.get("南校区食堂几点关门？", dependence="global") is not None
@@ -259,7 +290,7 @@ def test_anonymous_user_skips_read_and_write():
 
 def test_global_cache_normal_scenario_unchanged():
     """上下文无关问题：写 Global、读 Global，任意用户可复用。"""
-    cache, g, user = _cache()
+    cache, g, _user = _cache()
     cache.put("选课分几个阶段？", "选课一般分为预选、正选、退改选几个阶段。", domain="academic", dependence="global")
     assert len(g.entries) == 1
     hit = cache.get("选课分几个阶段？", dependence="global")
@@ -272,7 +303,7 @@ def test_global_cache_normal_scenario_unchanged():
 
 
 def test_stats_reports_bypass():
-    cache, g, user = _cache()
+    cache, _g, _user = _cache()
     cache.get("那几点开门？", user_id="u1", dependence="skip")
     cache.get("选课什么时候开始？", dependence="global")
     s = cache.stats
@@ -282,6 +313,7 @@ def test_stats_reports_bypass():
 
 
 # ── API 层读写路由（/chat 与 /chat/stream 共用同一逻辑）──────────────────────
+
 
 class _RecordingCache:
     """记录 get/put 调用参数，模拟语义缓存。"""
@@ -294,7 +326,9 @@ class _RecordingCache:
         self.gets.append((query, user_id, dependence))
         return None
 
-    def put(self, query, response, domain="other", agent_type="", user_id=None, dependence="global", knowledge_used=False):
+    def put(
+        self, query, response, domain="other", agent_type="", user_id=None, dependence="global", knowledge_used=False
+    ):
         self.puts.append({"query": query, "domain": domain, "user_id": user_id, "dependence": dependence})
 
 
@@ -368,10 +402,16 @@ def test_explicit_benchmark_request_bypasses_semantic_cache(monkeypatch):
     from starlette.requests import Request
 
     monkeypatch.setenv("ECHOGUIDE_BENCHMARK_ENABLED", "1")
-    request = Request({
-        "type": "http", "method": "POST", "path": "/chat",
-        "headers": [(b"x-echoguide-benchmark-strategy", b"adaptive")],
-    })
+    # chat 已要求登录（匿名 401）；这里直接伪造已登录身份
+    monkeypatch.setattr("api.routers.chat.optional_user", lambda request: SimpleNamespace(id="u1"))
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/chat",
+            "headers": [(b"x-echoguide-benchmark-strategy", b"adaptive")],
+        }
+    )
     cache = _run_chat("u1", request=request)
     assert cache.gets == []
     assert cache.puts == []
@@ -387,7 +427,9 @@ def test_chat_fact_query_with_history_still_reads_global():
 
 def test_chat_followup_skips_cache():
     """追问（强上下文依赖）→ dependence="skip"，get 内部直接 bypass。"""
-    cache = _run_chat("u1", context_text="[最近对话]\nuser: 南校区食堂几点关门？\nassistant: 22:00", message="那几点开门？")
+    cache = _run_chat(
+        "u1", context_text="[最近对话]\nuser: 南校区食堂几点关门？\nassistant: 22:00", message="那几点开门？"
+    )
     assert cache.gets
     assert cache.gets[0][2] == "skip"
 
@@ -403,7 +445,7 @@ def test_chat_write_fact_query_goes_global_even_with_context():
 
 def test_chat_write_personalized_goes_user_tier():
     """依赖用户画像的问题 → 写入 User 层（user_id 分区）。"""
-    cache = _run_chat("u1", context_text="[用户画像]\n{\"preferences\": [\"清淡\"]}", message="推荐一下食堂")
+    cache = _run_chat("u1", context_text='[用户画像]\n{"preferences": ["清淡"]}', message="推荐一下食堂")
     assert len(cache.puts) == 1
     assert cache.puts[0]["user_id"] == "u1"
     assert cache.puts[0]["dependence"] == "user"

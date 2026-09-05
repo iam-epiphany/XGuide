@@ -12,6 +12,7 @@ ModelGateway（runtime/model_gateway.py）离线测试。
 全部使用 fake client，不触发真实 LLM 与外部服务（项目不依赖 pytest-asyncio，
 async 测试统一用 asyncio.run 包裹）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,13 +37,17 @@ from runtime import (
 class FakeMessage:
     """最小 Message 假对象（content / stop_reason / usage）。"""
 
-    def __init__(self, text: str = "ok", stop_reason: str = "end_turn",
-                 input_tokens: int = 10, output_tokens: int = 5):
+    def __init__(self, text: str = "ok", stop_reason: str = "end_turn", input_tokens: int = 10, output_tokens: int = 5):
         self.content = [type("B", (), {"type": "text", "text": text})()]
         self.stop_reason = stop_reason
-        self.usage = type("U", (), {
-            "input_tokens": input_tokens, "output_tokens": output_tokens,
-        })()
+        self.usage = type(
+            "U",
+            (),
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        )()
 
 
 class FakeClient:
@@ -69,6 +74,7 @@ def _state(policy: Optional[ExecutionPolicy] = None) -> RunState:
 
 # ── gateway 基础契约 ─────────────────────────────────────────────────────────
 
+
 def test_gateway_counts_real_model_calls_and_tokens():
     async def run():
         runtime = AgentRuntime(policy=ExecutionPolicy())
@@ -77,14 +83,16 @@ def test_gateway_counts_real_model_calls_and_tokens():
         # 一次 handle 内 3 次真实模型调用
         for _ in range(3):
             await runtime.model_gateway.call(
-                client=client, model="test-model",
+                client=client,
+                model="test-model",
                 messages=[{"role": "user", "content": "hi"}],
-                state=state, max_tokens=64,
+                state=state,
+                max_tokens=64,
             )
         return state, client
 
     state, client = asyncio.run(run())
-    assert state.step_count == 3        # 模型调用次数（而非 handle 次数）
+    assert state.step_count == 3  # 模型调用次数（而非 handle 次数）
     assert state.input_tokens == 30
     assert state.output_tokens == 15
     assert client.calls == 3
@@ -95,7 +103,8 @@ def test_gateway_without_state_skips_hooks():
         runtime = AgentRuntime(policy=ExecutionPolicy())
         client = FakeClient()
         result = await runtime.model_gateway.call(
-            client=client, model="test-model",
+            client=client,
+            model="test-model",
             messages=[{"role": "user", "content": "hi"}],
             state=None,  # 记忆提炼等无请求上下文路径
             max_tokens=64,
@@ -115,16 +124,21 @@ def test_gateway_retries_transient_failures():
         state = _state(runtime.policy)
         client = FakeClient(fail_times=2)  # 前两次失败
         result = await runtime.model_gateway.call(
-            client=client, model="test-model",
+            client=client,
+            model="test-model",
             messages=[{"role": "user", "content": "hi"}],
-            state=state, retries=2, max_tokens=64,
+            state=state,
+            retries=2,
+            max_tokens=64,
         )
         return result, state, client
 
     result, state, client = asyncio.run(run())
     assert result.attempts == 3
     assert client.calls == 3
-    assert state.step_count == 3  # 每次尝试都是真实模型调用
+    # 口径：before_model（步骤计数/预算）按逻辑调用计一次，重试是内部实现细节。
+    # 旧实现每次 attempt 重复 before_model 会让预算随重试虚增。
+    assert state.step_count == 1
 
 
 def test_gateway_no_retry_by_default():
@@ -134,7 +148,8 @@ def test_gateway_no_retry_by_default():
         client = FakeClient(fail_times=1)
         with pytest.raises(RuntimeError):
             await runtime.model_gateway.call(
-                client=client, model="test-model",
+                client=client,
+                model="test-model",
                 messages=[{"role": "user", "content": "hi"}],
                 state=state,  # retries 默认 0
                 max_tokens=64,
@@ -153,15 +168,19 @@ def test_gateway_model_call_budget_enforced():
         client = FakeClient()
         for _ in range(2):
             await runtime.model_gateway.call(
-                client=client, model="test-model",
+                client=client,
+                model="test-model",
                 messages=[{"role": "user", "content": "hi"}],
-                state=state, max_tokens=64,
+                state=state,
+                max_tokens=64,
             )
         with pytest.raises(BudgetExceeded):
             await runtime.model_gateway.call(
-                client=client, model="test-model",
+                client=client,
+                model="test-model",
                 messages=[{"role": "user", "content": "hi"}],
-                state=state, max_tokens=64,
+                state=state,
+                max_tokens=64,
             )
         return state, client
 
@@ -177,15 +196,21 @@ def test_gateway_budget_violation_not_retried():
         state = _state(runtime.policy)
         client = FakeClient()
         await runtime.model_gateway.call(
-            client=client, model="test-model",
+            client=client,
+            model="test-model",
             messages=[{"role": "user", "content": "hi"}],
-            state=state, retries=3, max_tokens=64,
+            state=state,
+            retries=3,
+            max_tokens=64,
         )
         with pytest.raises(BudgetExceeded):
             await runtime.model_gateway.call(
-                client=client, model="test-model",
+                client=client,
+                model="test-model",
                 messages=[{"role": "user", "content": "hi"}],
-                state=state, retries=3, max_tokens=64,
+                state=state,
+                retries=3,
+                max_tokens=64,
             )
         return client
 
@@ -195,11 +220,13 @@ def test_gateway_budget_violation_not_retried():
 
 # ── Agent 工具循环真实计数 ───────────────────────────────────────────────────
 
+
 def test_agent_loop_steps_and_tool_rounds():
     """一次 handle 内 LLM→Tool→LLM：step=2、tool_round=1、token 累加。"""
 
     class LoopClient:
         """第一次调用返回 tool_use，第二次返回文本。"""
+
         def __init__(self):
             self.calls = 0
             self.messages = type("M", (), {"create": self._create})()
@@ -207,10 +234,16 @@ def test_agent_loop_steps_and_tool_rounds():
         async def _create(self, **kwargs):
             self.calls += 1
             if self.calls == 1:
-                block = type("B", (), {
-                    "type": "tool_use", "name": "noop_tool",
-                    "input": {}, "id": "tu_1",
-                })()
+                block = type(
+                    "B",
+                    (),
+                    {
+                        "type": "tool_use",
+                        "name": "noop_tool",
+                        "input": {},
+                        "id": "tu_1",
+                    },
+                )()
                 msg = FakeMessage(stop_reason="tool_use")
                 msg.content = [block]
                 msg.usage = type("U", (), {"input_tokens": 100, "output_tokens": 20})()
@@ -225,14 +258,20 @@ def test_agent_loop_steps_and_tool_rounds():
     async def run():
         runtime = AgentRuntime(policy=ExecutionPolicy())
         tm = MCPToolManager(api_key="sk-test")
-        tm.register(Tool(
-            name="noop_tool", description="noop", handler=noop,
-            schema={"type": "object", "properties": {}},
-            effect=ToolEffect.READ,  # 显式副作用声明（fail-closed）
-        ))
+        tm.register(
+            Tool(
+                name="noop_tool",
+                description="noop",
+                handler=noop,
+                schema={"type": "object", "properties": {}},
+                effect=ToolEffect.READ,  # 显式副作用声明（fail-closed）
+            )
+        )
         agent = TaskAgent(
-            LoopClient(), "test-model",
-            skill_manager=None, tool_manager=tm,
+            LoopClient(),
+            "test-model",
+            skill_manager=None,
+            tool_manager=tm,
         )
         agent._tool_allowlist = ["noop_tool"]
         req = Request(message="hi", user_id="u1", conv_id="c1", action=None, domain=None)
@@ -244,7 +283,7 @@ def test_agent_loop_steps_and_tool_rounds():
 
     resp, req = asyncio.run(run())
     assert resp.success
-    assert req.state.step_count == 2        # 真实模型调用 2 次
+    assert req.state.step_count == 2  # 真实模型调用 2 次
     assert req.state.tool_round_count == 1  # 真实工具轮 1 轮
     assert req.state.tool_call_count == 1
     assert req.state.input_tokens == 150
@@ -252,6 +291,7 @@ def test_agent_loop_steps_and_tool_rounds():
 
 
 # ── Fast→Deep 降级受 max_retries 约束 ────────────────────────────────────────
+
 
 def test_fast_deep_fallback_respects_max_retries():
     """max_retries=0 时 Fast 失败不再降级 Deep；max_retries=1 时降级一次。"""
@@ -266,9 +306,11 @@ def test_fast_deep_fallback_respects_max_retries():
     async def run_once(max_retries: int) -> int:
         runtime = AgentRuntime(policy=ExecutionPolicy(max_retries=max_retries))
         orchestrator = AgentOrchestrator(
-            api_key="sk-test", model="test-model",
+            api_key="sk-test",
+            model="test-model",
             runtime=runtime,
-            fast_model="test-fast", deep_model="test-deep",
+            fast_model="test-fast",
+            deep_model="test-deep",
         )
         # 用失败 client 替换两个 profile 的执行实例，模拟执行失败
         for a in orchestrator._agents.values():

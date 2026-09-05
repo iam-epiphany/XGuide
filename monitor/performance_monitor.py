@@ -18,6 +18,7 @@
   - Task 状态与 DAG blocked/failed 数量、Runtime 模型/工具调用计数、
     Verifier flags（Orchestrator.observability_counts）
 """
+
 import asyncio
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
@@ -35,34 +36,37 @@ logger = logging.getLogger(__name__)
 
 # ── 数据结构 ──────────────────────────────────────────────────────────────────
 
+
 class Severity(Enum):
-    INFO     = "info"
-    WARNING  = "warning"
-    ERROR    = "error"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
     CRITICAL = "critical"
 
 
 @dataclass
 class Alert:
-    severity:    Severity
-    metric:      str
-    message:     str
-    value:       float
-    threshold:   float
-    ts:          str = field(default_factory=lambda: datetime.now().astimezone().isoformat())
-    resolved:    bool = False
+    severity: Severity
+    metric: str
+    message: str
+    value: float
+    threshold: float
+    ts: str = field(default_factory=lambda: datetime.now().astimezone().isoformat())
+    resolved: bool = False
 
 
 @dataclass
 class Suggestion:
     """可操作的优化建议。"""
-    title:       str
-    detail:      str
-    action:      str    # 具体操作步骤
-    priority:    int    # 1-10
+
+    title: str
+    detail: str
+    action: str  # 具体操作步骤
+    priority: int  # 1-10
 
 
 # ── 异常检测 ──────────────────────────────────────────────────────────────────
+
 
 class AnomalyDetector:
     """
@@ -73,7 +77,7 @@ class AnomalyDetector:
     """
 
     def __init__(self, window: int = 60, sensitivity: float = 2.5):
-        self._window      = window
+        self._window = window
         self._sensitivity = sensitivity
         self._history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=window))
 
@@ -85,7 +89,7 @@ class AnomalyDetector:
         if len(buf) < self._window // 2:
             return None  # 数据不足，不检测
 
-        mean  = statistics.mean(buf)
+        mean = statistics.mean(buf)
         stdev = statistics.stdev(buf) if len(buf) > 1 else 0.0
         if stdev == 0:
             return None
@@ -93,16 +97,17 @@ class AnomalyDetector:
         z = abs(value - mean) / stdev
         if z > self._sensitivity:
             return {
-                "metric":   metric,
-                "value":    value,
-                "mean":     mean,
-                "z_score":  round(z, 2),
+                "metric": metric,
+                "value": value,
+                "mean": mean,
+                "z_score": round(z, 2),
                 "severity": "high" if z > self._sensitivity * 1.5 else "medium",
             }
         return None
 
 
 # ── 性能监控器 ────────────────────────────────────────────────────────────────
+
 
 class PerformanceMonitor:
     """
@@ -119,31 +124,32 @@ class PerformanceMonitor:
 
     # 告警阈值（agent_* 指标现按 Profile 采集，label 为 fast / deep）
     THRESHOLDS = {
-        "agent_success_rate":  (0.90, Severity.ERROR,   "less_than"),
-        "tool_success_rate":   (0.95, Severity.WARNING,  "less_than"),
-        "agent_avg_ms":        (3000, Severity.WARNING,  "greater_than"),
-        "tool_avg_ms":         (5000, Severity.ERROR,    "greater_than"),
+        "agent_success_rate": (0.90, Severity.ERROR, "less_than"),
+        "tool_success_rate": (0.95, Severity.WARNING, "less_than"),
+        "agent_avg_ms": (3000, Severity.WARNING, "greater_than"),
+        "tool_avg_ms": (5000, Severity.ERROR, "greater_than"),
     }
 
     def __init__(
         self,
         orchestrator,
         tool_manager,
-        interval_s:       float = 10.0,
-        webhook_url:      Optional[str] = None,
-        prometheus_port:  Optional[int] = None,   # None = 不启动
+        interval_s: float = 10.0,
+        webhook_url: Optional[str] = None,
+        prometheus_port: Optional[int] = None,  # None = 不启动
     ):
         self._orchestrator = orchestrator
         self._tool_manager = tool_manager
-        self._interval     = interval_s
-        self._webhook      = webhook_url
+        self._interval = interval_s
+        self._webhook = webhook_url
         self._webhook_tasks: set = set()  # 持有引用，防止未完成的 webhook 任务被 GC 回收
-        self._detector     = AnomalyDetector()
+        self._detector = AnomalyDetector()
 
-        self._alerts:      List[Alert]      = []
+        # 有界：resolved 告警从不移出的话会随指标波动无界增长
+        self._alerts: deque = deque(maxlen=200)
         self._suggestions: List[Suggestion] = []
-        self._active       = False
-        self._task:        Optional[asyncio.Task] = None
+        self._active = False
+        self._task: Optional[asyncio.Task] = None
 
         # Prometheus 指标（可选）
         self._prom: Dict[str, Any] = {}
@@ -157,7 +163,7 @@ class PerformanceMonitor:
             "agent_p95_latency_ms": Gauge("agent_p95_latency_ms", "Profile P95 延迟", ["agent"]),
             "agent_requests_total": Gauge("agent_requests_total", "Profile 请求总数", ["agent"]),
             "agent_in_flight": Gauge("agent_in_flight", "Profile 当前并发", ["agent"]),
-            "tool_success_rate":  Gauge("tool_success_rate", "工具成功率", ["tool"]),
+            "tool_success_rate": Gauge("tool_success_rate", "工具成功率", ["tool"]),
             "tool_avg_latency_ms": Gauge("tool_avg_latency_ms", "工具平均延迟", ["tool"]),
             "tool_requests_total": Gauge("tool_requests_total", "工具请求总数", ["tool"]),
             "task_status": Gauge("task_status", "Task 状态计数", ["status"]),
@@ -171,7 +177,7 @@ class PerformanceMonitor:
         if self._active:
             return
         self._active = True
-        self._task   = asyncio.create_task(self._loop())
+        self._task = asyncio.create_task(self._loop())
         logger.info(f"Monitor 已启动，采集间隔 {self._interval}s")
 
     async def stop(self) -> None:
@@ -201,12 +207,12 @@ class PerformanceMonitor:
         实时更新的数据，Monitor 不需要额外埋点。
         """
         agent_stats = self._orchestrator.get_stats()
-        tool_stats  = self._tool_manager.get_stats()
+        tool_stats = self._tool_manager.get_stats()
 
         # ── Profile 指标（每 Profile 单执行实例，key = fast / deep）──────────
         for profile_key, s in agent_stats.items():
-            sr  = s["success_rate"]
-            ms  = s["avg_ms"]
+            sr = s["success_rate"]
+            ms = s["avg_ms"]
 
             # 异常检测
             for metric, value in [("agent_success_rate", sr), ("agent_avg_ms", ms)]:
@@ -250,12 +256,14 @@ class PerformanceMonitor:
 
             # 连续失败 → 生成具体建议
             if cf >= 3:
-                self._add_suggestion(Suggestion(
-                    title=f"工具 {tool_name} 连续失败 {cf} 次",
-                    detail=f"成功率 {sr:.1%}，平均延迟 {ms:.0f}ms，熔断状态: {s['circuit_state']}",
-                    action="1. 检查工具依赖服务是否正常\n2. 查看错误日志\n3. 考虑增加超时时间或降级策略",
-                    priority=9,
-                ))
+                self._add_suggestion(
+                    Suggestion(
+                        title=f"工具 {tool_name} 连续失败 {cf} 次",
+                        detail=f"成功率 {sr:.1%}，平均延迟 {ms:.0f}ms，熔断状态: {s['circuit_state']}",
+                        action="1. 检查工具依赖服务是否正常\n2. 查看错误日志\n3. 考虑增加超时时间或降级策略",
+                        priority=9,
+                    )
+                )
 
         # ── 真实业务/执行维度计数（Task 状态 / Runtime 调用 / Verifier flags）─
         obs = getattr(self._orchestrator, "observability_counts", dict)()
@@ -269,27 +277,33 @@ class PerformanceMonitor:
         blocked = task_status.get("blocked", 0)
         failed = task_status.get("failed", 0)
         if blocked >= 3:
-            self._add_suggestion(Suggestion(
-                title=f"DAG 被阻塞任务 {blocked} 个",
-                detail="依赖失败导致下游任务被 BLOCKED（失败传播正常工作）",
-                action="1. 检查失败的上游任务日志\n2. 确认工具/检索链路可用性",
-                priority=7,
-            ))
+            self._add_suggestion(
+                Suggestion(
+                    title=f"DAG 被阻塞任务 {blocked} 个",
+                    detail="依赖失败导致下游任务被 BLOCKED（失败传播正常工作）",
+                    action="1. 检查失败的上游任务日志\n2. 确认工具/检索链路可用性",
+                    priority=7,
+                )
+            )
         if failed >= 3:
-            self._add_suggestion(Suggestion(
-                title=f"任务执行失败 {failed} 个",
-                detail="任务 DAG 中出现失败节点，检查模型/工具调用",
-                action="1. 查看 Trace 定位失败任务\n2. 检查对应工具成功率与熔断状态",
-                priority=8,
-            ))
+            self._add_suggestion(
+                Suggestion(
+                    title=f"任务执行失败 {failed} 个",
+                    detail="任务 DAG 中出现失败节点，检查模型/工具调用",
+                    action="1. 查看 Trace 定位失败任务\n2. 检查对应工具成功率与熔断状态",
+                    priority=8,
+                )
+            )
         for flag, count in verifier_flags.items():
             if count >= 5:
-                self._add_suggestion(Suggestion(
-                    title=f"出口校验标记 {flag} × {count}",
-                    detail="Verifier 反复标记同一风险（只标注不阻断）",
-                    action="1. 检查对应工具证据/引用链路\n2. 确认是否需要补充检索",
-                    priority=6,
-                ))
+                self._add_suggestion(
+                    Suggestion(
+                        title=f"出口校验标记 {flag} × {count}",
+                        detail="Verifier 反复标记同一风险（只标注不阻断）",
+                        action="1. 检查对应工具证据/引用链路\n2. 确认是否需要补充检索",
+                        priority=6,
+                    )
+                )
 
         self._generate_profile_suggestions(agent_stats)
 
@@ -303,10 +317,8 @@ class PerformanceMonitor:
         只做这一条规则，不引入复杂在线学习。
         """
         from agents.profiles import ProfileName
-        fast_keys = [
-            k for k, s in agent_stats.items()
-            if s.get("profile") == ProfileName.FAST.value
-        ]
+
+        fast_keys = [k for k, s in agent_stats.items() if s.get("profile") == ProfileName.FAST.value]
         if not fast_keys:
             return True
         for key in fast_keys:
@@ -320,8 +332,9 @@ class PerformanceMonitor:
         if metric not in self.THRESHOLDS:
             return
         threshold, severity, operator = self.THRESHOLDS[metric]
-        triggered = (operator == "less_than" and value < threshold) or \
-                    (operator == "greater_than" and value > threshold)
+        triggered = (operator == "less_than" and value < threshold) or (
+            operator == "greater_than" and value > threshold
+        )
         key = f"{metric}:{label}"
         # 已存在未解决的同指标告警：异常持续中不重复告警（去重），恢复时标记 resolved
         active = next((a for a in self._alerts if a.metric == key and not a.resolved), None)
@@ -354,17 +367,19 @@ class PerformanceMonitor:
         """
         for profile_key, s in agent_stats.items():
             if s["success_rate"] < 0.85 and s["total"] > 10:
-                self._add_suggestion(Suggestion(
-                    title=f"Profile {profile_key} 成功率偏低",
-                    detail=f"成功率 {s['success_rate']:.1%}，P95 延迟 {s.get('p95_ms', 0)}ms",
-                    action=(
-                        "Monitor 已把本应走 Fast 的请求临时升级 Deep。\n"
-                        "建议：1. 检查该 Profile 的模型/端点配置与限流状态\n"
-                        "      2. 查看错误日志与工具成功率\n"
-                        "      3. 确认是否需要调整模型或端点（异构路由）"
-                    ),
-                    priority=8,
-                ))
+                self._add_suggestion(
+                    Suggestion(
+                        title=f"Profile {profile_key} 成功率偏低",
+                        detail=f"成功率 {s['success_rate']:.1%}，P95 延迟 {s.get('p95_ms', 0)}ms",
+                        action=(
+                            "Monitor 已把本应走 Fast 的请求临时升级 Deep。\n"
+                            "建议：1. 检查该 Profile 的模型/端点配置与限流状态\n"
+                            "      2. 查看错误日志与工具成功率\n"
+                            "      3. 确认是否需要调整模型或端点（异构路由）"
+                        ),
+                        priority=8,
+                    )
+                )
 
     def _add_suggestion(self, s: Suggestion) -> None:
         # 去重：相同 title 不重复添加
@@ -385,13 +400,13 @@ class PerformanceMonitor:
         """返回当前监控摘要，供 API 层暴露。"""
         obs = getattr(self._orchestrator, "observability_counts", dict)()
         return {
-            "agent_stats":   self._orchestrator.get_stats(),
-            "tool_stats":    self._tool_manager.get_stats(),
-            "task_status":   obs.get("task_status") or {},
+            "agent_stats": self._orchestrator.get_stats(),
+            "tool_stats": self._tool_manager.get_stats(),
+            "task_status": obs.get("task_status") or {},
             "runtime_counts": obs.get("runtime") or {},
             "verifier_flags": obs.get("verification") or {},
             "active_alerts": [asdict(a) for a in self._alerts if not a.resolved][-10:],
-            "suggestions":   [
+            "suggestions": [
                 {"title": s.title, "action": s.action, "priority": s.priority}
                 for s in sorted(self._suggestions, key=lambda x: -x.priority)[:5]
             ],

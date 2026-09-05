@@ -36,6 +36,7 @@ AgentOrchestrator —— EchoGuide 编排器（决策闭环：Intent → Planner
 Monitor 有限反馈：Fast profile 在线表现不健康时，Orchestrator 临时把
 本应走 Fast 的请求升级 Deep（不引入 RL/Bandit/在线学习）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -74,49 +75,53 @@ logger = logging.getLogger(__name__)
 
 # 知识领域：这些领域的请求由 Harness 预检索注入证据（retrieval-first）。
 # personal 是个人数据操作（课表/待办），other 是闲聊，都不检索知识库。
-_KNOWLEDGE_DOMAINS = frozenset({
-    IntentDomain.ACADEMIC, IntentDomain.CAMPUS_LIFE,
-    IntentDomain.AFFAIRS, IntentDomain.IT_HELP,
-})
+_KNOWLEDGE_DOMAINS = frozenset(
+    {
+        IntentDomain.ACADEMIC,
+        IntentDomain.CAMPUS_LIFE,
+        IntentDomain.AFFAIRS,
+        IntentDomain.IT_HELP,
+    }
+)
 
 
 @dataclass
 class Request:
-    message:     str
-    user_id:     str
-    conv_id:     str
-    context:     str = ""        # 来自 MemoryManager 的格式化上下文
-    history:     Optional[List[Dict[str, str]]] = None  # 对话历史，传给意图识别
-    intent:      Optional[IntentCategory] = None        # 兼容字段
-    domain:      Optional[IntentDomain]   = None        # 领域语境（人格挂载键）
-    action:      Optional[IntentAction]   = None        # 动作（Run 执行策略依据）
-    goal:        str = ""        # Task goal（Task-scoped 指令，注入 system prompt）
-    task_id:     str = ""        # 所属 Task（Agent Run 边界标识）
+    message: str
+    user_id: str
+    conv_id: str
+    context: str = ""  # 来自 MemoryManager 的格式化上下文
+    history: Optional[List[Dict[str, str]]] = None  # 对话历史，传给意图识别
+    intent: Optional[IntentCategory] = None  # 兼容字段
+    domain: Optional[IntentDomain] = None  # 领域语境（人格挂载键）
+    action: Optional[IntentAction] = None  # 动作（Run 执行策略依据）
+    goal: str = ""  # Task goal（Task-scoped 指令，注入 system prompt）
+    task_id: str = ""  # 所属 Task（Agent Run 边界标识）
     allowed_write_tools: Optional[List[str]] = None  # 任务级写工具白名单（Planner 声明，最小权限；读工具不受限）
-    request_id:  str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     confidence: float = 0.0
     classifier_stage: str = "preset"
     profile: Optional[ProfileName] = None
-    profile_policy: str = ""                  # 复杂度/置信度策略原始选择（不含 Monitor 故障转移）
-    complexity_mode: str = "single"          # 由 Planner 产出的 ExecutionPlan.mode 回填
+    profile_policy: str = ""  # 复杂度/置信度策略原始选择（不含 Monitor 故障转移）
+    complexity_mode: str = "single"  # 由 Planner 产出的 ExecutionPlan.mode 回填
     complexity_reason: str = "单领域请求"
-    planning_strategy: str = ""              # fast_path / llm / benchmark_single_agent
+    planning_strategy: str = ""  # fast_path / llm / benchmark_single_agent
     benchmark_strategy: str = "adaptive"
-    state: Optional[RunState] = None   # Runtime 运行状态（编排器 run() 创建后回填）
+    state: Optional[RunState] = None  # Runtime 运行状态（编排器 run() 创建后回填）
     state_query: Optional[Dict[str, Any]] = None  # 查询理解产出（needs_knowledge，Verifier 消费）
-    auto_retrieve: bool = False        # 知识类请求：Harness 预检索注入证据（retrieval-first）
+    auto_retrieve: bool = False  # 知识类请求：Harness 预检索注入证据（retrieval-first）
 
 
 @dataclass
 class OrchestratorResult:
-    request_id:  str
-    response:    str
-    agent_type:  str                       # 展示标签：任务领域值（task.domain.value）
-    intent:      Optional[IntentCategory]
-    domain:      Optional[IntentDomain] = None
-    action:      Optional[IntentAction] = None
-    latency_ms:  float = 0.0
-    tools_used:  List[str] = field(default_factory=list)  # 本次调用的工具（RAG 等）
+    request_id: str
+    response: str
+    agent_type: str  # 展示标签：任务领域值（task.domain.value）
+    intent: Optional[IntentCategory]
+    domain: Optional[IntentDomain] = None
+    action: Optional[IntentAction] = None
+    latency_ms: float = 0.0
+    tools_used: List[str] = field(default_factory=list)  # 本次调用的工具（RAG 等）
     tool_evidence: List[Dict[str, Any]] = field(default_factory=list)
     execution: Dict[str, Any] = field(default_factory=dict)
 
@@ -138,9 +143,9 @@ class AgentOrchestrator:
 
     def __init__(
         self,
-        api_key:  str,
+        api_key: str,
         base_url: Optional[str] = None,
-        model:    str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-3-5-sonnet-20241022",
         skill_manager: Optional[Any] = None,
         tool_manager: Optional[Any] = None,
         fast_api_key: Optional[str] = None,
@@ -150,8 +155,8 @@ class AgentOrchestrator:
         deep_base_url: Optional[str] = None,
         deep_model: Optional[str] = None,
         memory_store: Optional[LayeredStore] = None,
-        runtime: Optional[AgentRuntime] = None,      # Agent Runtime（缺省自建：默认策略 + 默认中间件）
-        policy: Optional[ExecutionPolicy] = None,    # 执行预算（缺省读 ECHOGUIDE_RUNTIME_* 环境变量）
+        runtime: Optional[AgentRuntime] = None,  # Agent Runtime（缺省自建：默认策略 + 默认中间件）
+        policy: Optional[ExecutionPolicy] = None,  # 执行预算（缺省读 ECHOGUIDE_RUNTIME_* 环境变量）
     ):
         def make_client(key: str, url: Optional[str]) -> AsyncAnthropic:
             kwargs: Dict[str, Any] = {"api_key": key}
@@ -179,12 +184,16 @@ class AgentOrchestrator:
         # ModelGateway 进出（模型调用计数、token 统计、预算、Trace 口径一致）。
         self._gateway = self._runtime.model_gateway
         self._intent_recognizer = IntentRecognizer(
-            api_key=fast_key, base_url=fast_url, model=fast_name,
+            api_key=fast_key,
+            base_url=fast_url,
+            model=fast_name,
             gateway=self._gateway,
         )
         # Planner（统一输出 ExecutionPlan）：本地 Fast Path + LLM 规划升级
         self._planner = TaskPlanner(
-            client=fast_client, model=fast_name, gateway=self._gateway,
+            client=fast_client,
+            model=fast_name,
+            gateway=self._gateway,
             max_tasks=self._runtime.policy.max_tasks,
             max_agents=self._runtime.policy.max_agents,
         )
@@ -192,20 +201,23 @@ class AgentOrchestrator:
         # → SharedState → Synthesizer（合并）。协作只经 Harness，无 Agent 间通信。
         self._executor = TaskExecutor(self._run_task)
         self._synthesizer = Synthesizer(
-            deep_client, deep_name, max_tokens=self._runtime.policy.synth_max_tokens,
+            deep_client,
+            deep_name,
+            max_tokens=self._runtime.policy.synth_max_tokens,
             gateway=self._gateway,
         )
         # 出口校验（Verifier/Grounding）：规则校验全量；LLM 判定按策略开关，
         # 走廉价 Fast 模型，仅 DEEP/执行路径启用（Fast 路径不付这笔成本）。
         self._verifier = ResponseVerifier(
-            client=fast_client, model=fast_name,
+            client=fast_client,
+            model=fast_name,
             llm_enabled=self._runtime.policy.verifier_llm_enabled,
             gateway=self._gateway,
         )
         self._verification_flags: Dict[str, int] = {}
         self._skill_manager = skill_manager
-        self._tool_manager  = tool_manager
-        self._memory_store  = memory_store  # 上下文卸载落盘（refs 表），与 MemoryManager 共享
+        self._tool_manager = tool_manager
+        self._memory_store = memory_store  # 上下文卸载落盘（refs 表），与 MemoryManager 共享
 
         # 执行实例（每 Profile 单实例）：TaskAgent 是唯一 Agent 类，实例按
         # Execution Profile（Fast/Deep）区分；每个 Task 以独立 Run 执行（每次
@@ -214,11 +226,17 @@ class AgentOrchestrator:
         # 真正异构 Model/Provider/Endpoint 时再扩展路由层。
         self._agents: Dict[ProfileName, TaskAgent] = {
             ProfileName.FAST: TaskAgent(
-                fast_client, fast_name, skill_manager, tool_manager,
+                fast_client,
+                fast_name,
+                skill_manager,
+                tool_manager,
                 self._profiles[ProfileName.FAST],
             ),
             ProfileName.DEEP: TaskAgent(
-                deep_client, deep_name, skill_manager, tool_manager,
+                deep_client,
+                deep_name,
+                skill_manager,
+                tool_manager,
                 self._profiles[ProfileName.DEEP],
             ),
         }
@@ -257,9 +275,7 @@ class AgentOrchestrator:
         self._tool_manager = tool_manager
         for agent in self._agents.values():
             agent._tool_manager = tool_manager
-        self._planner.set_tool_names(
-            set(tool_manager._tools) if tool_manager is not None else None
-        )
+        self._planner.set_tool_names(set(tool_manager._tools) if tool_manager is not None else None)
 
     def set_memory_store(self, memory_store: Optional[LayeredStore]) -> None:
         """注入/更新分层记忆存储（上下文卸载落盘），与 MemoryManager 共享实例。"""
@@ -291,18 +307,18 @@ class AgentOrchestrator:
 
     # 兼容映射：旧调用方只传 IntentCategory 时，推导出 domain / action。
     _CATEGORY_TO_DOMAIN = {
-        IntentCategory.ACADEMIC:    IntentDomain.ACADEMIC,
+        IntentCategory.ACADEMIC: IntentDomain.ACADEMIC,
         IntentCategory.CAMPUS_LIFE: IntentDomain.CAMPUS_LIFE,
-        IntentCategory.AFFAIRS:     IntentDomain.AFFAIRS,
-        IntentCategory.IT_HELP:     IntentDomain.IT_HELP,
-        IntentCategory.PERSONAL:    IntentDomain.PERSONAL,
+        IntentCategory.AFFAIRS: IntentDomain.AFFAIRS,
+        IntentCategory.IT_HELP: IntentDomain.IT_HELP,
+        IntentCategory.PERSONAL: IntentDomain.PERSONAL,
     }
     _CATEGORY_TO_ACTION = {
-        IntentCategory.QUERY:      IntentAction.QUERY,
-        IntentCategory.REQUEST:    IntentAction.REQUEST,
-        IntentCategory.GREETING:   IntentAction.GREETING,
-        IntentCategory.COMPLAINT:  IntentAction.COMPLAINT,
-        IntentCategory.FEEDBACK:   IntentAction.FEEDBACK,
+        IntentCategory.QUERY: IntentAction.QUERY,
+        IntentCategory.REQUEST: IntentAction.REQUEST,
+        IntentCategory.GREETING: IntentAction.GREETING,
+        IntentCategory.COMPLAINT: IntentAction.COMPLAINT,
+        IntentCategory.FEEDBACK: IntentAction.FEEDBACK,
     }
 
     async def run(self, req: Request, on_event: Optional[Any] = None) -> OrchestratorResult:
@@ -327,7 +343,10 @@ class AgentOrchestrator:
             return await self._run_single(req, on_event)
 
         result = await self._runtime.run(
-            state, core, on_event=on_event, services={"req": req},
+            state,
+            core,
+            on_event=on_event,
+            services={"req": req},
         )
         if result is None:
             reason = state.meta.get("reject_message", "请求被安全策略拦截")
@@ -370,22 +389,24 @@ class AgentOrchestrator:
                     force_llm="always_llm" in req.benchmark_strategy,
                     state=req.state,
                 )
-                req.domain  = intent_result.domain
-                req.action  = intent_result.action
-                req.intent  = intent_result.intent
+                req.domain = intent_result.domain
+                req.action = intent_result.action
+                req.intent = intent_result.intent
                 req.confidence = intent_result.confidence
                 req.classifier_stage = intent_result.classifier_stage
                 # 查询理解产出：needs_knowledge 由 Verifier 消费（判定需要但无证据 → 标记）
                 req.state_query = {"needs_knowledge": intent_result.needs_knowledge}
                 if on_event is not None:
-                    await on_event({
-                        "type": "meta",
-                        "domain": req.domain.value if req.domain else "other",
-                        "action": req.action.value if req.action else "other",
-                        "confidence": intent_result.confidence,
-                        "classifier_stage": intent_result.classifier_stage,
-                        "needs_knowledge": intent_result.needs_knowledge,
-                    })
+                    await on_event(
+                        {
+                            "type": "meta",
+                            "domain": req.domain.value if req.domain else "other",
+                            "action": req.action.value if req.action else "other",
+                            "confidence": intent_result.confidence,
+                            "classifier_stage": intent_result.classifier_stage,
+                            "needs_knowledge": intent_result.needs_knowledge,
+                        }
+                    )
 
         if req.state is not None:
             req.state.record_decision(
@@ -431,19 +452,26 @@ class AgentOrchestrator:
                 strategy=plan.strategy,
                 reason=plan.reason,
                 mode=plan.mode,
-                tasks=[{
-                    "task_id": task.task_id, "domain": task.domain.value,
-                    "action": task.action.value, "depends_on": list(task.depends_on),
-                    "contract": task.contract(),
-                } for task in plan.tasks],
+                tasks=[
+                    {
+                        "task_id": task.task_id,
+                        "domain": task.domain.value,
+                        "action": task.action.value,
+                        "depends_on": list(task.depends_on),
+                        "contract": task.contract(),
+                    }
+                    for task in plan.tasks
+                ],
             )
         if on_event is not None:
-            await on_event({
-                "type": "meta",
-                "mode": plan.mode,
-                "profile": req.profile.value,
-                "complexity_reason": plan.reason,
-            })
+            await on_event(
+                {
+                    "type": "meta",
+                    "mode": plan.mode,
+                    "profile": req.profile.value,
+                    "complexity_reason": plan.reason,
+                }
+            )
 
         # 3. 执行：single → 单任务直执行（1 次 TaskAgent Run）；
         #    parallel/dependent → Harness 分波协作（每个 Task 独立 Run）
@@ -543,7 +571,10 @@ class AgentOrchestrator:
             )
         # Harness：分波执行（失败传播），产出 SharedState
         shared = await self._executor.execute(
-            req, plan.tasks, on_event, max_tasks=self._runtime.policy.max_tasks,
+            req,
+            plan.tasks,
+            on_event,
+            max_tasks=self._runtime.policy.max_tasks,
         )
 
         # Synthesizer：合并最终回复
@@ -606,13 +637,13 @@ class AgentOrchestrator:
             context=req.context,
             history=req.history,
             intent=req.intent,
-            domain=task.domain,   # 任务领域 → 人格挂载键（Skill 平级发现，不按领域过滤）
-            action=task.action,   # 任务自己的 action（不继承原始请求，决定 Run 执行策略）
-            goal=task.goal,       # Task goal（注入 system prompt [任务目标]）
-            task_id=task.task_id, # Agent Run 边界标识
+            domain=task.domain,  # 任务领域 → 人格挂载键（Skill 平级发现，不按领域过滤）
+            action=task.action,  # 任务自己的 action（不继承原始请求，决定 Run 执行策略）
+            goal=task.goal,  # Task goal（注入 system prompt [任务目标]）
+            task_id=task.task_id,  # Agent Run 边界标识
             allowed_write_tools=task.allowed_write_tools,  # 任务级写工具白名单（最小权限，Agent 双重门禁）
             request_id=req.request_id,
-            state=req.state,      # 协作任务继承运行状态（中间件钩子/预算计数不断链）
+            state=req.state,  # 协作任务继承运行状态（中间件钩子/预算计数不断链）
             auto_retrieve=task.domain in _KNOWLEDGE_DOMAINS,  # 任务领域知识类 → 预检索
         )
         task_req.profile = req.profile
@@ -677,10 +708,14 @@ class AgentOrchestrator:
                     )
                     return response
                 if on_event is not None:
-                    await on_event({
-                        "type": "tool", "name": task.required_tool,
-                        "status": "start", "input": task.required_tool_args,
-                    })
+                    await on_event(
+                        {
+                            "type": "tool",
+                            "name": task.required_tool,
+                            "status": "start",
+                            "input": task.required_tool_args,
+                        }
+                    )
                 # 补执行同样走统一 Runtime Tool 执行边界（before/after 钩子 + Trace
                 # span）：工具计数、预算与 trace 口径和 Agent 工具循环一致，不能绕过
                 # Runtime 直接调 ToolManager。
@@ -691,21 +726,28 @@ class AgentOrchestrator:
                     await runtime.fire_tool_before(req.state, task.required_tool, task.required_tool_args)
                 try:
                     async with span("tool_call", tool=task.required_tool):
-                        result = await self._tool_manager.call(
-                            task.required_tool,
-                            task.required_tool_args,
-                            context={"agent_type": task.domain.value, "user_id": req.user_id},
-                            use_rewrite=False,
-                        ) if self._tool_manager is not None else None
+                        result = (
+                            await self._tool_manager.call(
+                                task.required_tool,
+                                task.required_tool_args,
+                                context={"agent_type": task.domain.value, "user_id": req.user_id},
+                                use_rewrite=False,
+                            )
+                            if self._tool_manager is not None
+                            else None
+                        )
                 finally:
                     if runtime is not None and req.state is not None:
                         await runtime.fire_tool_after(
-                            req.state, task.required_tool,
+                            req.state,
+                            task.required_tool,
                             result.data if result is not None and result.success else None,
                             result.error if result is not None and not result.success else None,
                         )
                     TaskAgent._record_tool_trace(
-                        task_req, task.required_tool, result,
+                        task_req,
+                        task.required_tool,
+                        result,
                         (time.monotonic() - tool_started) * 1000,
                     )
                 if result is not None and result.success:
@@ -808,9 +850,7 @@ class AgentOrchestrator:
             self._runtime_call_counts["tool_calls"] = (
                 self._runtime_call_counts.get("tool_calls", 0) + summary["tool_calls"]
             )
-            self._runtime_call_counts["retries"] = (
-                self._runtime_call_counts.get("retries", 0) + summary["retries"]
-            )
+            self._runtime_call_counts["retries"] = self._runtime_call_counts.get("retries", 0) + summary["retries"]
         # Runtime 执行摘要（step/tool/retry 计数与 trace_id），纯增量字段
         if req.state is not None:
             meta["runtime"] = req.state.summary()
@@ -854,9 +894,7 @@ class AgentOrchestrator:
             if req.state is not None and req.state.policy is not None:
                 max_retries = req.state.policy.max_retries
             if req.state is not None and req.state.retry_count >= max_retries:
-                logger.warning(
-                    f"Fast 执行失败，已达降级次数上限 {max_retries}，不再重试"
-                )
+                logger.warning(f"Fast 执行失败，已达降级次数上限 {max_retries}，不再重试")
                 return response
             logger.warning("Fast 执行失败，降级重试 Deep")
             if req.state is not None:
@@ -924,14 +962,14 @@ class AgentOrchestrator:
         for profile, agent in self._agents.items():
             s = agent.stats
             result[profile.value] = {
-                "total":        s.total,
+                "total": s.total,
                 "success_rate": round(s.success_rate, 3),
-                "avg_ms":       round(s.avg_ms, 1),
-                "p50_ms":       s.p50_ms,
-                "p95_ms":       s.p95_ms,
-                "in_flight":    s.in_flight,
-                "profile":      profile.value,
-                "model":        agent.profile.model,
+                "avg_ms": round(s.avg_ms, 1),
+                "p50_ms": s.p50_ms,
+                "p95_ms": s.p95_ms,
+                "in_flight": s.in_flight,
+                "profile": profile.value,
+                "model": agent.profile.model,
             }
         return result
 

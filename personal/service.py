@@ -10,14 +10,18 @@
 说明：周X 统一指本周的周X（"周五"在今天周三时指本周五，在今天周六时指本周五<已过>），
 语义简单一致，避免跨周歧义。
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
 from personal.store import PersonalStore
 from personal.time_context import SEMESTER_START, WEEKDAY_CN
+
+logger = logging.getLogger(__name__)
 
 _WEEKDAY_NUM = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 
@@ -28,6 +32,7 @@ class DateExprError(ValueError):
 
 # ── 教学周工具 ────────────────────────────────────────────────────────────────
 
+
 def compress_weeks(weeks: List[int]) -> str:
     """教学周压缩：[1,2,3,5,6,7,9] → "1-3,5-7,9"；空列表 → ""（所有周）。"""
     if not weeks:
@@ -35,7 +40,7 @@ def compress_weeks(weeks: List[int]) -> str:
     sorted_weeks = sorted(set(weeks))
     parts: List[str] = []
     start = prev = sorted_weeks[0]
-    for w in sorted_weeks[1:] + [None]:
+    for w in [*sorted_weeks[1:], None]:
         if w is None or w != prev + 1:
             parts.append(str(start) if start == prev else f"{start}-{prev}")
             start = prev = w if w is not None else prev
@@ -69,6 +74,7 @@ def week_in(w: int, weeks_expr: str) -> bool:
 
 
 # ── 日期表达式解析 ────────────────────────────────────────────────────────────
+
 
 def parse_date_expr(expr: Optional[str], today: Optional[date] = None) -> date:
     """
@@ -112,6 +118,7 @@ def parse_date_expr(expr: Optional[str], today: Optional[date] = None) -> date:
 
 # ── 查询服务 ──────────────────────────────────────────────────────────────────
 
+
 class PersonalService:
     """个人数据中心查询服务（对话工具与 REST API 共用）。"""
 
@@ -129,14 +136,16 @@ class PersonalService:
                 weeks_expr = weeks
             else:
                 weeks_expr = compress_weeks([int(w) for w in weeks])
-            rows.append({
-                "course": c["course"],
-                "day_of_week": int(c["day_of_week"]),
-                "start_time": c["start_time"],
-                "end_time": c["end_time"],
-                "location": c.get("location", ""),
-                "weeks": weeks_expr,
-            })
+            rows.append(
+                {
+                    "course": c["course"],
+                    "day_of_week": int(c["day_of_week"]),
+                    "start_time": c["start_time"],
+                    "end_time": c["end_time"],
+                    "location": c.get("location", ""),
+                    "weeks": weeks_expr,
+                }
+            )
         return await self.store.replace_schedule(user_id, rows)
 
     async def courses_on(
@@ -157,13 +166,15 @@ class PersonalService:
         courses = []
         for r in rows:
             if r["day_of_week"] == target.weekday() and week_in(week, r["weeks"]):
-                courses.append({
-                    "course": r["course"],
-                    "start_time": r["start_time"],
-                    "end_time": r["end_time"],
-                    "location": r["location"],
-                    "week_num": week,
-                })
+                courses.append(
+                    {
+                        "course": r["course"],
+                        "start_time": r["start_time"],
+                        "end_time": r["end_time"],
+                        "location": r["location"],
+                        "week_num": week,
+                    }
+                )
         courses.sort(key=lambda c: c["start_time"])
         return {
             "date": target.isoformat(),
@@ -187,13 +198,15 @@ class PersonalService:
             if r["day_of_week"] != target.weekday() or not week_in(week, r["weeks"]):
                 continue
             if r["start_time"] <= time_str <= r["end_time"]:
-                result.append({
-                    "course": r["course"],
-                    "start_time": r["start_time"],
-                    "end_time": r["end_time"],
-                    "location": r["location"],
-                    "week_num": week,
-                })
+                result.append(
+                    {
+                        "course": r["course"],
+                        "start_time": r["start_time"],
+                        "end_time": r["end_time"],
+                        "location": r["location"],
+                        "week_num": week,
+                    }
+                )
         return result
 
     async def weekly_overview(self, user_id: str, today: Optional[date] = None) -> Dict[str, Any]:
@@ -205,10 +218,7 @@ class PersonalService:
         if not in_semester:
             week = 0  # 开学前（假期）：周数显示为 0，由前端提示"假期/未开学"
         rows = await self.store.get_schedule(user_id)
-        week_courses = [
-            r for r in rows
-            if week_in(week, r["weeks"])
-        ]
+        week_courses = [r for r in rows if week_in(week, r["weeks"])]
         week_courses.sort(key=lambda r: (r["day_of_week"], r["start_time"]))
         return {
             "monday": monday.isoformat(),
@@ -245,8 +255,13 @@ class PersonalService:
         return await self.store.delete_todo(user_id, todo_id)
 
     async def update_todo(
-        self, user_id: str, todo_id: int, *, content: Optional[str] = None,
-        kind: Optional[str] = None, due_at: Optional[str] = None,
+        self,
+        user_id: str,
+        todo_id: int,
+        *,
+        content: Optional[str] = None,
+        kind: Optional[str] = None,
+        due_at: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         return await self.store.update_todo(user_id, todo_id, content=content, kind=kind, due_at=due_at)
 
@@ -263,22 +278,34 @@ class PersonalService:
         today = today or datetime.now().astimezone().date()
         deadline = today + timedelta(days=horizon_days)
         rows = await self.store.list_todos(
-            user_id, status="open", kinds=["ddl", "exam"], due_before=deadline,
+            user_id,
+            status="open",
+            kinds=["ddl", "exam"],
+            due_before=deadline,
         )
         result = []
         for r in rows:
             due = r["due_at"]
             if not due:
                 continue
-            due_date = date.fromisoformat(due[:10])
-            result.append({
-                "id": r["id"],
-                "content": r["content"],
-                "kind": r["kind"],
-                "due_at": due,
-                "days_left": (due_date - today).days,
-                "status": "已过期" if due_date < today else ("今天" if due_date == today else f"还剩{(due_date - today).days}天"),
-            })
+            # 历史脏数据防御：单条日期非法时跳过该条，不拖垮整个 upcoming 查询
+            try:
+                due_date = date.fromisoformat(due[:10])
+            except ValueError:
+                logger.warning("upcoming 跳过非法 due_at 的待办 id=%s: %r", r.get("id"), due)
+                continue
+            result.append(
+                {
+                    "id": r["id"],
+                    "content": r["content"],
+                    "kind": r["kind"],
+                    "due_at": due,
+                    "days_left": (due_date - today).days,
+                    "status": "已过期"
+                    if due_date < today
+                    else ("今天" if due_date == today else f"还剩{(due_date - today).days}天"),
+                }
+            )
         result.sort(key=lambda x: (x["days_left"], x["due_at"]))
         return result
 
@@ -308,8 +335,12 @@ class PersonalService:
         }
 
     async def free_time(
-        self, user_id: str, when: Optional[str] = None, today: Optional[date] = None,
-        start_time: str = "08:00", end_time: str = "22:00",
+        self,
+        user_id: str,
+        when: Optional[str] = None,
+        today: Optional[date] = None,
+        start_time: str = "08:00",
+        end_time: str = "22:00",
     ) -> Dict[str, Any]:
         """返回某日未被课程占用的时间段，方便直接回答“明天下午有空吗”。"""
         schedule = await self.courses_on(user_id, when, today)

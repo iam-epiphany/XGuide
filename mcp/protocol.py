@@ -11,6 +11,7 @@ MCP（Model Context Protocol）JSON-RPC 协议层。
 
 面试点：从"自研工具注册表"升级为"标准 MCP Server"，工具即插即用。
 """
+
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -25,11 +26,11 @@ PROTOCOL_VERSION = "2025-11-25"
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
 
 # JSON-RPC 错误码
-PARSE_ERROR        = -32700
-INVALID_REQUEST    = -32600
-METHOD_NOT_FOUND   = -32601
-INVALID_PARAMS     = -32602
-INTERNAL_ERROR     = -32603
+PARSE_ERROR = -32700
+INVALID_REQUEST = -32600
+METHOD_NOT_FOUND = -32601
+INVALID_PARAMS = -32602
+INTERNAL_ERROR = -32603
 
 
 class MCPServer:
@@ -37,7 +38,7 @@ class MCPServer:
 
     def __init__(self, tool_manager, user_id: str = "anonymous"):
         self._tool_manager = tool_manager
-        self._user_id = user_id   # 调用方（HTTP 层）注入的用户身份，供个人工具使用
+        self._user_id = user_id  # 调用方（HTTP 层）注入的用户身份，供个人工具使用
         self._initialized = False
         self._client_info: Dict[str, Any] = {}
 
@@ -89,7 +90,7 @@ class MCPServer:
             "initialize": self._initialize,
             "tools/list": self._tools_list,
             "tools/call": self._tools_call,
-            "ping":       self._ping,
+            "ping": self._ping,
         }
         handler = handlers.get(method)
         if handler is None:
@@ -115,20 +116,21 @@ class MCPServer:
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             "instructions": (
-                "EchoGuide MCP Server：校园知识库检索等工具。"
-                "tools/call 参数与工具声明中的 inputSchema 一致。"
+                "EchoGuide MCP Server：校园知识库检索等工具。tools/call 参数与工具声明中的 inputSchema 一致。"
             ),
         }
 
     async def _tools_list(self, params: Dict[str, Any], request_id: Any) -> Dict[str, Any]:
         tools = []
         for name, tool in self._tool_manager._tools.items():
-            tools.append({
-                "name": name,
-                "description": tool.description,
-                "inputSchema": tool.schema,
-                "annotations": _tool_annotations(name),
-            })
+            tools.append(
+                {
+                    "name": name,
+                    "description": tool.description,
+                    "inputSchema": tool.schema,
+                    "annotations": _tool_annotations(tool),
+                }
+            )
         return {"tools": tools}
 
     async def _tools_call(self, params: Dict[str, Any], request_id: Any) -> Dict[str, Any]:
@@ -144,13 +146,19 @@ class MCPServer:
         # 透传调用方注入的 user_id：个人工具（课表/待办/DDL）在 MCP 路径下按身份生效。
         # 信任模型与前端一致（HTTP 层通过 X-User-Id 请求头传入，同 user_id 软身份）。
         result = await self._tool_manager.call(
-            name, arguments,
+            name,
+            arguments,
             context={"mcp": True, "user_id": self._user_id},
         )
         # 工具业务失败是 tools/call 的正常结果，必须使用 isError 而不是 JSON-RPC
         # INTERNAL_ERROR，方便 MCP 客户端展示并继续会话。
         payload: Dict[str, Any] = {
-            "content": [{"type": "text", "text": json.dumps(result.data if result.success else {"error": result.error}, ensure_ascii=False)}],
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(result.data if result.success else {"error": result.error}, ensure_ascii=False),
+                }
+            ],
             "isError": not result.success,
         }
         if result.success and isinstance(result.data, dict) and _jsonable(result.data):
@@ -191,10 +199,15 @@ def _jsonable(value: Any) -> bool:
         return False
 
 
-def _tool_annotations(name: str) -> Dict[str, bool]:
-    """保守声明 MCP 工具副作用，避免客户端把写操作当只读调用。"""
-    if name in {"add_todo", "complete_todo"}:
+def _tool_annotations(tool: Any) -> Dict[str, bool]:
+    """由工具的 effect 声明推导 MCP 注解，避免客户端把写操作当只读调用。
+
+    副作用事实源是 tool_manager 注册表里的 effect（WRITE / EXTERNAL_SIDE_EFFECT），
+    这里只做映射，不再维护第二份硬编码工具名清单（硬编码必然随注册表漂移）。
+    未声明 effect 的工具按"可能有副作用"处理（宁可误标可写，不可漏标）。
+    """
+    if tool.effect is None or tool.is_write:
         return {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}
-    if name == "get_weather":
-        return {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True}
-    return {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+    # 已声明且非写的工具：外部数据源（如天气）标注 openWorldHint
+    open_world = tool.name == "get_weather"
+    return {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": open_world}

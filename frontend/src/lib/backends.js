@@ -3,6 +3,27 @@ const DEFAULT_BACKEND = {
   baseUrl: import.meta.env.VITE_API_URL || '/api'
 }
 
+// ── 统一错误类型与会话过期处理 ───────────────────────────────────────────────
+// 此前错误被拼成字符串，App.vue 再 indexOf('{') 反解析 detail——脆弱且口径分裂。
+// 现在抛结构化 ApiError：status 可编程判断，detail 是后端给的人话文案。
+export class ApiError extends Error {
+  constructor(message, status, detail) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail ?? message
+  }
+}
+
+// 401 全局钩子：会话过期时统一清登录态并弹出登录卡，而不是每个弹窗各报一条裸 401。
+let unauthorizedHandler = null
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn
+}
+
+// 常规请求默认超时（流式对话不走 requestJson，由调用方用 AbortController 控制）
+const DEFAULT_TIMEOUT_MS = 20000
+
 export function createInitialSettings() {
   const saved = readSettings()
   return {
@@ -64,17 +85,24 @@ export async function requestChatStream(settings, message, handlers = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    // 调用方可传 AbortController.signal 实现"停止生成"
+    signal: handlers.signal
   })
   if (!response.ok || !response.body) {
     let detail = `${response.status} ${response.statusText}`
+    let serverDetail = null
     try {
-      const payload = await response.json()
-      if (payload?.detail) detail = `${response.status} · ${payload.detail}`
+      const errorPayload = await response.json()
+      if (errorPayload?.detail) {
+        serverDetail = String(errorPayload.detail)
+        detail = `${response.status} · ${serverDetail}`
+      }
     } catch {
       // 非 JSON 错误响应沿用 HTTP 状态文本。
     }
-    throw new Error(detail)
+    if (response.status === 401 && unauthorizedHandler) unauthorizedHandler()
+    throw new ApiError(detail, response.status, serverDetail ?? detail)
   }
 
   const reader = response.body.getReader()
@@ -105,7 +133,7 @@ export async function requestChatStream(settings, message, handlers = {}) {
       // 服务端 error 事件携带真实异常，直接抛出而不是等流结束报笼统文案
       if (ev.type === 'error') {
         if (handlers.onEvent) handlers.onEvent(ev)
-        throw new Error(ev.message || '服务端返回错误')
+        throw new ApiError(ev.message || '服务端返回错误', null, ev.message)
       }
       if (handlers.onEvent) handlers.onEvent(ev)
     }
@@ -187,22 +215,21 @@ export async function deleteTodo(settings, id) {
   })
 }
 
-export async function updateTodo(settings, id, changes) {
-  return requestJson(backendMeta(settings).baseUrl, `/personal/todo/${id}`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes)
-  })
-}
-
 export async function getToday(settings) {
   return requestJson(backendMeta(settings).baseUrl, '/personal/today')
 }
 
-export async function getReminders(settings) {
-  return requestJson(backendMeta(settings).baseUrl, '/personal/reminders')
+/** LLM 晨间简报（后端按用户/日期/数据指纹缓存，未配置 LLM 时 available=false）。 */
+export async function getTodayBriefing(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/personal/today/briefing')
 }
 
-export async function getFreeTime(settings, when = '今天') {
-  return requestJson(backendMeta(settings).baseUrl, `/personal/free-time?when=${encodeURIComponent(when)}`)
+/** LLM 空档利用建议（把待办/DDL 安排进当天真实空闲时段）。 */
+export async function getFreeTimeAdvice(settings, when = '今天') {
+  return requestJson(
+    backendMeta(settings).baseUrl,
+    `/personal/free-time/advice?when=${encodeURIComponent(when)}`
+  )
 }
 
 export async function getStudentProfile(settings) {
@@ -221,6 +248,20 @@ export async function getInbox(settings, status = 'active') {
 
 export async function getInboxBriefing(settings) {
   return requestJson(backendMeta(settings).baseUrl, '/inbox/briefing')
+}
+
+/** LLM 收件箱摘要叙述（60-120 字中文，带缓存）。 */
+export async function getInboxNarrative(settings) {
+  return requestJson(backendMeta(settings).baseUrl, '/inbox/narrative')
+}
+
+/** 粘贴课表文本导入（LLM 解析 + 规则兜底）。 */
+export async function importScheduleText(settings, text) {
+  return requestJson(backendMeta(settings).baseUrl, '/personal/schedule/import/text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  })
 }
 
 export async function refreshInbox(settings) {
@@ -274,23 +315,14 @@ export function logoutUser(settings) {
   return requestJson(backendMeta(settings).baseUrl, '/auth/logout', { method: 'POST' })
 }
 
-function normalizeChatResponse(raw) {
-  return {
-    conversationId: raw.conv_id || raw.conversationId || '',
-    response: raw.response || '',
-    intent: raw.intent || 'other',
-    agentType: raw.agent_type || raw.agentType || '',
-    latencyMs: Number(raw.latency_ms ?? raw.latencyMs ?? 0),
-    knowledgeUsed: Boolean(raw.knowledge_used ?? raw.knowledgeUsed),
-    verified: raw.verified,
-    grounded: raw.grounded,
-    raw
-  }
-}
-
 async function requestJson(baseUrl, path, options = {}) {
   const url = `${normalizeBaseUrl(baseUrl)}${path}`
-  const response = await fetch(url, { credentials: 'include', ...options })
+  const response = await fetch(url, {
+    credentials: 'include',
+    ...options,
+    // 调用方传了 signal 则尊重之（如手动取消），否则默认超时兜底
+    signal: options.signal ?? AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
+  })
   const text = await response.text()
   let data = null
   try {
@@ -299,8 +331,17 @@ async function requestJson(baseUrl, path, options = {}) {
     data = text
   }
   if (!response.ok) {
-    const detail = typeof data === 'string' ? data : JSON.stringify(data)
-    throw new Error(`${response.status} ${response.statusText}: ${detail}`)
+    const detail =
+      data && typeof data === 'object' && typeof data.detail === 'string' && data.detail.trim()
+        ? data.detail
+        : typeof data === 'string'
+          ? data
+          : JSON.stringify(data)
+    // 登录/注册失败自身就是 401，不触发"会话过期"流程
+    if (response.status === 401 && unauthorizedHandler && !path.startsWith('/auth/')) {
+      unauthorizedHandler()
+    }
+    throw new ApiError(`${response.status} ${response.statusText}: ${detail}`, response.status, detail)
   }
   return data
 }

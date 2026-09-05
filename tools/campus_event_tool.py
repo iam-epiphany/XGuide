@@ -1,4 +1,5 @@
 """Campus Event Store 的 Agent 工具：Inbox 与 Chat 读取同一份持久化事件。"""
+
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -15,8 +16,15 @@ async def query_campus_events_handler(params: Dict[str, Any], context: Dict[str,
     if not radar or not personal:
         return {"available": False, "message": "校园通知服务暂不可用。"}
     profile = await personal.store.get_profile(_user_id(context))
-    events = await radar.relevant_events(_user_id(context), profile, str(params.get("query", "")), int(params.get("limit", 8) or 8))
-    return {"available": True, "events": events, "total": len(events), "profile_complete": bool(profile.get("education") or profile.get("interests"))}
+    events = await radar.relevant_events(
+        _user_id(context), profile, str(params.get("query", "")), int(params.get("limit", 8) or 8)
+    )
+    return {
+        "available": True,
+        "events": events,
+        "total": len(events),
+        "profile_complete": bool(profile.get("education") or profile.get("interests")),
+    }
 
 
 async def get_campus_event_handler(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -29,7 +37,29 @@ async def get_campus_event_handler(params: Dict[str, Any], context: Dict[str, An
     if not event:
         return {"available": False, "message": "未找到该通知。"}
     # 原文保留在 Store，但面向 Agent 仅提供必要详情与来源，避免上下文膨胀。
-    return {"available": True, "event": {key: event.get(key) for key in ("id", "title", "event_type", "summary", "targets", "deadline", "requirements", "materials", "actions", "location", "source_name", "source_url", "published_at", "updated_at", "body")}}
+    return {
+        "available": True,
+        "event": {
+            key: event.get(key)
+            for key in (
+                "id",
+                "title",
+                "event_type",
+                "summary",
+                "targets",
+                "deadline",
+                "requirements",
+                "materials",
+                "actions",
+                "location",
+                "source_name",
+                "source_url",
+                "published_at",
+                "updated_at",
+                "body",
+            )
+        },
+    }
 
 
 async def create_action_plan_handler(params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:

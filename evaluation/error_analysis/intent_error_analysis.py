@@ -22,6 +22,7 @@
   - A（领域边界 / 追问继承）：免费路径判错，但正确领域在 Embedding
       候选内（信号存在、决策或阈值组合问题），或追问形态下领域回填失败。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -85,8 +86,7 @@ def _classify(record: dict) -> dict:
             return "A", f"追问形态（{record['reason']}），领域回填为 {pred}，未继承 {gold}"
         if emb_hit:
             return "A", (
-                f"关键词直返 {pred}，但正确领域 {gold} 在 Embedding 候选"
-                f"[{emb_desc()}]：领域边界/双确认阈值问题"
+                f"关键词直返 {pred}，但正确领域 {gold} 在 Embedding 候选[{emb_desc()}]：领域边界/双确认阈值问题"
             )
         return "B", (
             f"关键词直返 {pred}（pattern={pat.get('domain')} {pat.get('confidence', 0):.2f}），"
@@ -178,10 +178,14 @@ async def main() -> int:
         "total_domain_cases": len(domain_cases),
         "domain_accuracy": round(sum(1 for r in domain_cases if r["correct"]) / len(domain_cases), 4),
         "domain_correct": sum(1 for r in domain_cases if r["correct"]),
-        "action_accuracy": round(sum(1 for r in action_cases if r["correct"]) / len(action_cases), 4) if action_cases else None,
+        "action_accuracy": round(sum(1 for r in action_cases if r["correct"]) / len(action_cases), 4)
+        if action_cases
+        else None,
         "error_categories": cat_counts,
         "error_stages": stage_counts,
-        "per_domain": {k: {**v, "accuracy": round(v["correct"] / v["total"], 4)} for k, v in sorted(per_domain.items())},
+        "per_domain": {
+            k: {**v, "accuracy": round(v["correct"] / v["total"], 4)} for k, v in sorted(per_domain.items())
+        },
         "confusion": dict(sorted(confusion.items(), key=lambda kv: -kv[1])),
         "errors": list(errors),
         "all": records,
@@ -191,8 +195,7 @@ async def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"领域准确率: {report['domain_accuracy']:.4f} "
-          f"({report['domain_correct']}/{report['total_domain_cases']})")
+    print(f"领域准确率: {report['domain_accuracy']:.4f} ({report['domain_correct']}/{report['total_domain_cases']})")
     print(f"动作准确率: {report['action_accuracy']}")
     print("错误分类:", json.dumps(cat_counts, ensure_ascii=False))
     print("错误路由阶段:", json.dumps(stage_counts, ensure_ascii=False))

@@ -4,6 +4,7 @@ query_ddl —— 考试与 DDL 倒计时查询工具。
 返回未来 N 天内（含已过期未完成）的考试/截止任务及剩余天数，
 供"我最近有什么考试""DDL 还有几天"类问题使用。
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict

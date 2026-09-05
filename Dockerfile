@@ -2,7 +2,9 @@
 # 目标：生产镜像尽量精简，开发镜像包含调试工具
 
 # ── 阶段 1：基础环境 ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS base
+# 基础镜像按 digest 钉死：同 tag 的远端内容随时间变化会破坏构建可复现性。
+# 升级基础镜像：docker pull <image> 后用 image inspect 的 RepoDigest 更新此处。
+FROM python:3.12-slim@sha256:507285ff17cb1d1756d3711c7543e82188f7a3752c79a9b3a4f9320640390300 AS base
 
 WORKDIR /app
 
@@ -20,22 +22,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── 阶段 2：安装 Python 依赖 ──────────────────────────────────────────────────
 FROM base AS dependencies
 
+# 可选：pip 镜像源。CI（GitHub Actions）走默认官方源即可；国内本地构建可传
+# --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple 加速，
+# 否则容器内 pip 直连官方源可能远慢于宿主机（宿主机的 pip.ini 不会带入容器）。
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_INDEX_URL=$PIP_INDEX_URL
+
 # 可选：模型下载镜像端点（如 https://hf-mirror.com），构建时 --build-arg HF_ENDPOINT=...
 ARG HF_ENDPOINT=https://huggingface.co
 ENV HF_ENDPOINT=$HF_ENDPOINT
 
-COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
-
 # 预下载 ChromaDB 内置的 ONNX embedding 模型（~79MB），避免运行时下载超时
-# （本地 bge 模型不可用时的回退向量空间）
+# （本地 bge 模型不可用时的回退向量空间）。
+# 放在 COPY requirements/pip install 之前：它不依赖任何 Python 包，独立成层后
+# 依赖清单变更不会连带触发这 79MB 的重新下载（S3 直连在国内网络下可能非常慢）。
 RUN mkdir -p /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2 && \
     curl -L --retry 3 --retry-delay 5 -o /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx.tar.gz \
     https://chroma-onnx-models.s3.amazonaws.com/all-MiniLM-L6-v2/onnx.tar.gz && \
     cd /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2 && \
     tar -xzf onnx.tar.gz && \
     rm onnx.tar.gz
+
+# 全量传递锁：镜像构建可复现（事实源 requirements.txt，重生成命令见 requirements.lock 头部）
+COPY requirements.lock .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.lock
 
 # 预下载本地向量模型（bge-small-zh-v1.5 Embedding ~95MB + bge-reranker-base ~570MB）
 # 与运行期共用 mcp/embeddings.py 的下载逻辑，落在默认缓存目录（root 的 ~/.cache）

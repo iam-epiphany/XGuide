@@ -4,6 +4,7 @@
   - [Eval] 质量不达标：主评分低于及格线（或扩展指标低分）时，问题/回答/分数落日志
   - [Eval] Judge 失败：Judge 自身故障单独记录，不得误报为质量退化
 """
+
 import asyncio
 import logging
 from pathlib import Path
@@ -36,9 +37,12 @@ class _FakeOrchResult:
 def _make_evaluator(judge_result=None, tool_evidence=None):
     """构造不真正调用 LLM 的评测器；judge_result 给定时替换 judge.judge。"""
     orchestrator = MagicMock()
-    orchestrator.run = AsyncMock(return_value=_FakeOrchResult(
-        "食堂晚上七点关门，次日六点开门。", tool_evidence=tool_evidence,
-    ))
+    orchestrator.run = AsyncMock(
+        return_value=_FakeOrchResult(
+            "食堂晚上七点关门，次日六点开门。",
+            tool_evidence=tool_evidence,
+        )
+    )
     evaluator = EndToEndEvaluator(
         orchestrator=orchestrator,
         recognizer=None,
@@ -65,7 +69,7 @@ def test_low_quality_logs_question_scores_and_response(caplog):
     assert "0.2" in text
     assert "agent_type=campus_life" in text
     assert "judge_model=judge-test" in text
-    assert "response=" in text                            # Agent 回答已落日志
+    assert "response=" in text  # Agent 回答已落日志
 
 
 def test_judge_failure_logged_separately(caplog):
@@ -85,9 +89,12 @@ def test_judge_failure_logged_separately(caplog):
 def test_extension_metric_low_score_logged_even_if_main_passes(caplog):
     """主评分达标但扩展指标（Faithfulness）低分：同样记录，捕获幻觉等主评分发现不了的问题。"""
     good = QualityScores(relevance=0.9, accuracy=0.9, completeness=0.9, helpfulness=0.9)
-    evaluator = _make_evaluator(good, tool_evidence=[
-        {"title": "食堂与餐饮", "content": "南校区食堂晚上七点关门。"},
-    ])
+    evaluator = _make_evaluator(
+        good,
+        tool_evidence=[
+            {"title": "食堂与餐饮", "content": "南校区食堂晚上七点关门。"},
+        ],
+    )
     evaluator._retrieval_evaluator = object()  # 仅需非 None 以启用扩展指标评测
     evaluator._judge.judge_faithfulness = AsyncMock(return_value=(0.4, False))
     with caplog.at_level(logging.WARNING, logger=_LOG_LOGGER):

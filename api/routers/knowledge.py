@@ -1,4 +1,5 @@
 """知识库路由：文档导入（文本/文件上传）、统计与检索演示。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/knowledge", tags=["知识库"])
 
 class DocInput(BaseModel):
     """单篇文档输入。"""
+
     title: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=100_000)
     domain: Optional[Literal["academic", "campus_life", "affairs", "it_help", "general"]] = None
@@ -27,6 +29,7 @@ class DocInput(BaseModel):
 
 class BatchDocInput(BaseModel):
     """批量文档导入请求体。"""
+
     documents: List[DocInput] = Field(min_length=1, max_length=100)
 
 
@@ -50,13 +53,21 @@ async def add_knowledge(body: BatchDocInput, _admin=Depends(require_admin)):
     if state._kb is None:
         raise HTTPException(503, "知识库未初始化")
     kb = state._kb
-    count = await asyncio.to_thread(kb.add_documents, [
-        {
-            "title": d.title, "content": d.content, "domain": d.domain,
-            "source_url": d.source_url, "updated_at": d.updated_at.isoformat() if d.updated_at else "",
-            "valid_from": d.valid_from.isoformat() if d.valid_from else "", "source_status": d.source_status,
-        } for d in body.documents
-    ])
+    count = await asyncio.to_thread(
+        kb.add_documents,
+        [
+            {
+                "title": d.title,
+                "content": d.content,
+                "domain": d.domain,
+                "source_url": d.source_url,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else "",
+                "valid_from": d.valid_from.isoformat() if d.valid_from else "",
+                "source_status": d.source_status,
+            }
+            for d in body.documents
+        ],
+    )
     return {"message": f"成功导入 {count} 个文档片段", "added_chunks": count, "total_chunks": kb.doc_count}
 
 
@@ -83,6 +94,7 @@ async def upload_knowledge(file: UploadFile = File(...), _admin=Depends(require_
         raise HTTPException(413, "文件大小超过 10MB 限制")
 
     from mcp.document_parser import parse_document
+
     try:
         docs = parse_document(file.filename or "unknown", content)
     except ValueError as e:

@@ -65,6 +65,7 @@ Campus Radar 仅访问无需登录的官方公开页面。同步请求不会携�
 | PUT | `/student-profile` | 保存学院、专业、年级、学历层次和关注方向 |
 | POST | `/inbox/refresh` | 同步公开通知源，返回已检查/新增/更新/未变更数量及来源错误 |
 | GET | `/inbox?status=active` | 读取个性化 Inbox；状态可为 `active`、`all`、`new`、`seen`、`interested`、`ignored` |
+| GET | `/inbox/briefing` | 返回今日关注、个性化推荐、事务分类、其他动态及同主题通知时间线 |
 | POST | `/inbox/{event_id}/status` | 设置为 `seen`、`interested` 或 `ignored` |
 | DELETE | `/inbox` | 传入 `event_ids` 批量删除；传空数组或空请求体一键清空当前用户 Inbox |
 | POST | `/inbox/{event_id}/add-to-plan` | 依据通知原文中已提取的材料/动作创建个人待办 |
@@ -87,7 +88,18 @@ Campus Radar 仅访问无需登录的官方公开页面。同步请求不会携�
 { "status": "interested" }
 ```
 
-`add-to-plan` 会返回 `plan_id`、来源事件和已创建的 `items`。该接口只转换通知正文中可核验的材料和动作；不会凭空补写办理步骤、资格条件或截止日期。
+`add-to-plan` 的响应外层包含 `message` 和 `plan`；`plan` 内含 `plan_id`、来源事件、证据说明和已创建的 `items`。该接口只转换通知正文中可核验的材料和动作；不会凭空补写办理步骤、资格条件或截止日期。
+
+```json
+{
+  "message": "已生成个人行动计划",
+  "plan": {
+    "plan_id": "abcd1234ef56",
+    "event": {"id": 12, "source_url": "https://example.edu/notice/12"},
+    "items": []
+  }
+}
+```
 
 ## 对话与知识
 

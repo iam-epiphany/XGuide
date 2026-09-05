@@ -1,4 +1,5 @@
 """Skill catalog、统一只读加载与资源路径保护测试。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,7 +18,10 @@ def _write_skill(root: Path, name: str, body: str) -> None:
 def _make_manager():
     tmp = tempfile.TemporaryDirectory()
     root = Path(tmp.name)
-    _write_skill(root, "course-planning", """---
+    _write_skill(
+        root,
+        "course-planning",
+        """---
 name: 课程规划
 description: 选课与培养方案的决策支持
 keywords: 选课,培养方案
@@ -25,8 +29,12 @@ enabled: true
 ---
 # Goal
 先检索官方课程规则。
-""")
-    _write_skill(root, "campus-card-service", """---
+""",
+    )
+    _write_skill(
+        root,
+        "campus-card-service",
+        """---
 name: 校园卡服务
 description: 校园卡挂失与补办流程
 keywords: 校园卡,挂失
@@ -34,7 +42,8 @@ enabled: true
 ---
 # Goal
 先挂失，再查询办理流程。
-""")
+""",
+    )
     manager = SkillManager(root_dir=str(root))
     manager.load()
     return tmp, manager

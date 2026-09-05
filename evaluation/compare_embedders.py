@@ -16,6 +16,7 @@
   - 任一模型不可用（无本地缓存/无网络）时跳过该模型并提示，其余照常对比；
   - 结果同时输出到 evaluation/embedding_compare_result.json 与 stdout。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,6 +39,7 @@ OUTPUT_PATH = ROOT / "evaluation" / "embedding_compare_result.json"
 
 # ── 文档集（与运行时导入同源）──────────────────────────────────────────────
 
+
 def _load_document_set() -> List[Dict[str, Any]]:
     docs = [dict(d) for d in DEFAULT_DOCS]
     public = ROOT / "data" / "public" / "academic_policies.json"
@@ -46,6 +48,7 @@ def _load_document_set() -> List[Dict[str, Any]]:
     docs_dir = ROOT / "data" / "knowledge_docs"
     if docs_dir.is_dir():
         from mcp.document_parser import SUPPORTED_EXTENSIONS, parse_document
+
         for path in sorted(docs_dir.iterdir()):
             if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 docs.extend(parse_document(path.name, path.read_bytes()))
@@ -65,11 +68,12 @@ def _chunk_documents(docs: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
 
 # ── 向量化检索（纯 numpy，独立于 ChromaDB）─────────────────────────────────
 
+
 def _embed_all(embedder: Callable[[List[str]], Any], texts: List[str]) -> np.ndarray:
     """批量嵌入并 L2 归一化（cosine 空间：归一化后点积即相似度）。"""
     vecs: List[np.ndarray] = []
     for i in range(0, len(texts), 64):
-        for v in embedder(texts[i:i + 64]):
+        for v in embedder(texts[i : i + 64]):
             arr = np.asarray(v, dtype=np.float32)
             norm = np.linalg.norm(arr)
             vecs.append(arr / norm if norm > 0 else arr)
@@ -84,23 +88,23 @@ def _retrieve(
 ) -> List[Dict[str, Any]]:
     sims = chunk_vecs @ query_vec
     order = np.argsort(-sims)[:top_k]
-    return [
-        {"title": chunks[i][0], "content": chunks[i][1], "score": float(sims[i])}
-        for i in order
-    ]
+    return [{"title": chunks[i][0], "content": chunks[i][1], "score": float(sims[i])} for i in order]
 
 
 # ── 各 embedder 工厂（与生产链路同款实现）──────────────────────────────────
 
+
 def _make_minilm() -> Callable[[List[str]], Any]:
     """旧链路：chromadb 内置 all-MiniLM-L6-v2（DefaultEmbeddingFunction）。"""
     from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
     return DefaultEmbeddingFunction()
 
 
 def _make_bge() -> Callable[[List[str]], Any]:
     """新链路：本地 bge-small-zh-v1.5（mcp.embeddings，chromadb 协议入口无前缀）。"""
     from mcp.embeddings import LocalEmbedder
+
     embedder = LocalEmbedder()
     if not embedder.available:
         raise RuntimeError(f"bge 模型不可用: {embedder._model.error}")
@@ -108,6 +112,7 @@ def _make_bge() -> Callable[[List[str]], Any]:
 
 
 # ── 主流程 ─────────────────────────────────────────────────────────────────
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Embedding 模型检索质量 A/B 对比")
@@ -143,9 +148,11 @@ def main() -> int:
             "mrr": metrics["mrr"],
         }
         print(f"  {name}")
-        print(f"    HitRate@{args.top_k} = {metrics['hit_rate@K']:.4f}"
-              f"  Recall@{args.top_k} = {metrics['recall@K']:.4f}"
-              f"  MRR = {metrics['mrr']:.4f}")
+        print(
+            f"    HitRate@{args.top_k} = {metrics['hit_rate@K']:.4f}"
+            f"  Recall@{args.top_k} = {metrics['recall@K']:.4f}"
+            f"  MRR = {metrics['mrr']:.4f}"
+        )
 
     # 汇总对比行
     models = report["models"]
@@ -159,8 +166,7 @@ def main() -> int:
     else:
         print("\n  仅 1 个模型可用，无法对比；请在模型缓存/网络可用的环境运行。")
 
-    OUTPUT_PATH.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUTPUT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n结果已保存: {OUTPUT_PATH}")
     return 0 if "bge-small-zh-v1.5 (新)" in models else 1
 

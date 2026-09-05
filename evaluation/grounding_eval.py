@@ -14,6 +14,7 @@ skipped，覆盖直接引用、同义改写、词面相似但事实相反、数�
 Filter 的误判单独报告）。核心目标：优先 Citation Precision —— 宁可少引用，
 也不要给没有证据支持的事实挂引用。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -78,16 +79,21 @@ def evaluate(cases: list[dict], results: list[dict]) -> dict:
                 strict_ok += 1
         exp_evidence = case.get("expected_evidence")
         if exp_evidence is not None and predicted == POSITIVE and rec.get("citation") != exp_evidence:
-            citation_errors.append({"id": case["id"], "citation": rec.get("citation"),
-                                    "expected": exp_evidence})
+            citation_errors.append({"id": case["id"], "citation": rec.get("citation"), "expected": exp_evidence})
     precision = tp / (tp + fp) if tp + fp else 1.0
     recall = tp / (tp + fn) if tp + fn else 1.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {
-        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-        "precision": round(precision, 4), "recall": round(recall, 4), "f1": round(f1, 4),
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
         "accuracy": round((tp + tn) / (tp + fp + fn + tn), 4) if tp + fp + fn + tn else None,
-        "strict_ok": strict_ok, "strict_total": strict_total,
+        "strict_ok": strict_ok,
+        "strict_total": strict_total,
         "skipped_ok": skipped_ok,
         "expected_skip_processed": expected_skip_processed,
         "citation_errors": citation_errors,
@@ -133,8 +139,7 @@ async def run_grid(cases: list[dict], use_embed: bool) -> list[dict]:
             cos_scores = [0.0] * len(evidences)
         cands = await g.match_evidence_candidates(claim, evidences, cos_scores)
         active = [c for c in cands if c["guard"]["level"] != "hard"]
-        results.append({"case": case, "best": active[0] if active else None,
-                        "active": active, "claim": claim})
+        results.append({"case": case, "best": active[0] if active else None, "active": active, "claim": claim})
     return results
 
 
@@ -145,8 +150,7 @@ def grid_metrics(cases: list[dict], pre: list[dict], min_dice: float, min_cos: f
         if case.get("expected") == "skip":
             continue
         expected = case.get("expected", "unsupported")
-        verdict = g.decide_by_scores(p["best"], p["active"], p["claim"],
-                                     min_dice=min_dice, min_cos=min_cos)
+        verdict = g.decide_by_scores(p["best"], p["active"], p["claim"], min_dice=min_dice, min_cos=min_cos)
         predicted = verdict == POSITIVE
         if predicted and expected == POSITIVE:
             tp += 1
@@ -159,8 +163,16 @@ def grid_metrics(cases: list[dict], pre: list[dict], min_dice: float, min_cos: f
     precision = tp / (tp + fp) if tp + fp else 1.0
     recall = tp / (tp + fn) if tp + fn else 1.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return {"min_dice": min_dice, "min_cos": min_cos, "tp": tp, "fp": fp, "fn": fn,
-            "precision": precision, "recall": recall, "f1": f1}
+    return {
+        "min_dice": min_dice,
+        "min_cos": min_cos,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }
 
 
 def print_report(cases: list[dict], results: list[dict], stats: dict, grid: list[dict] | None) -> None:
@@ -169,39 +181,50 @@ def print_report(cases: list[dict], results: list[dict], stats: dict, grid: list
         print(format_case_line(case, rec))
     print("\n=== 指标（positive = supported；skipped 不计入）===")
     print(f"  TP={stats['tp']} FP={stats['fp']} FN={stats['fn']} TN={stats['tn']}")
-    print(f"  Precision={stats['precision']}  Recall={stats['recall']}  F1={stats['f1']}"
-          f"  Accuracy={stats['accuracy']}")
-    print(f"  严格状态匹配 {stats['strict_ok']}/{stats['strict_total']}；"
-          f"模糊区间 Claim（无 Judge 兜底 insufficient）{stats['fuzzy_count']} 条")
-    print(f"  skipped 用例正确处理 {stats['skipped_ok']}/{sum(1 for c in cases if c.get('expected') == 'skip')}；"
-          f"应 skip 却被处理: {stats['expected_skip_processed'] or '无'}")
+    print(f"  Precision={stats['precision']}  Recall={stats['recall']}  F1={stats['f1']}  Accuracy={stats['accuracy']}")
+    print(
+        f"  严格状态匹配 {stats['strict_ok']}/{stats['strict_total']}；"
+        f"模糊区间 Claim（无 Judge 兜底 insufficient）{stats['fuzzy_count']} 条"
+    )
+    print(
+        f"  skipped 用例正确处理 {stats['skipped_ok']}/{sum(1 for c in cases if c.get('expected') == 'skip')}；"
+        f"应 skip 却被处理: {stats['expected_skip_processed'] or '无'}"
+    )
     if stats["citation_errors"]:
         print(f"  引用编号错误: {stats['citation_errors']}")
     else:
         print("  引用编号全部命中 expected_evidence")
-    fps = [(c["id"], c["claim"]) for c, r in zip(cases, results, strict=False)
-           if r["predicted"] == POSITIVE and c.get("expected") not in (POSITIVE, "skip")]
-    fns = [(c["id"], c["claim"]) for c, r in zip(cases, results, strict=False)
-           if r["predicted"] != POSITIVE and c.get("expected") == POSITIVE]
+    fps = [
+        (c["id"], c["claim"])
+        for c, r in zip(cases, results, strict=False)
+        if r["predicted"] == POSITIVE and c.get("expected") not in (POSITIVE, "skip")
+    ]
+    fns = [
+        (c["id"], c["claim"])
+        for c, r in zip(cases, results, strict=False)
+        if r["predicted"] != POSITIVE and c.get("expected") == POSITIVE
+    ]
     print(f"\n  False Positive（误挂引用）: {fps or '无'}")
     print(f"  False Negative（漏挂引用）: {fns or '无'}")
     if grid:
         print("\n=== 阈值网格标定（F1）===")
         for row in sorted(grid, key=lambda r: -r["f1"])[:12]:
             flag = " ★当前" if (row["min_dice"] == g.MIN_DICE and row["min_cos"] == g.MIN_COS) else ""
-            print(f"  min_dice={row['min_dice']:.2f} min_cos={row['min_cos']:.2f} "
-                  f"→ P={row['precision']:.3f} R={row['recall']:.3f} F1={row['f1']:.3f}{flag}")
+            print(
+                f"  min_dice={row['min_dice']:.2f} min_cos={row['min_cos']:.2f} "
+                f"→ P={row['precision']:.3f} R={row['recall']:.3f} F1={row['f1']:.3f}{flag}"
+            )
 
 
 def apply_thresholds(best: dict) -> None:
     """把网格最优阈值回写 core/grounding.py 的 MIN_DICE/MIN_COS 常量。"""
     src = GROUNDING_PY.read_text(encoding="utf-8")
-    src = re.sub(r"^MIN_DICE = .*$", f"MIN_DICE = {best['min_dice']:.2f}",
-                 src, count=1, flags=re.M)
-    src = re.sub(r"^MIN_COS = .*$", f"MIN_COS = {best['min_cos']:.2f}",
-                 src, count=1, flags=re.M)
+    src = re.sub(r"^MIN_DICE = .*$", f"MIN_DICE = {best['min_dice']:.2f}", src, count=1, flags=re.M)
+    src = re.sub(r"^MIN_COS = .*$", f"MIN_COS = {best['min_cos']:.2f}", src, count=1, flags=re.M)
     GROUNDING_PY.write_text(src, encoding="utf-8")
-    print(f"\n已回写 grounding.py：MIN_DICE={best['min_dice']:.2f} MIN_COS={best['min_cos']:.2f}（请人工 review 后提交）")
+    print(
+        f"\n已回写 grounding.py：MIN_DICE={best['min_dice']:.2f} MIN_COS={best['min_cos']:.2f}（请人工 review 后提交）"
+    )
 
 
 async def main() -> int:
@@ -226,11 +249,12 @@ async def main() -> int:
         print_report(cases, results, stats, grid)
         # F1 相同时取更保守（更严格）的阈值；当前常量如果在最优平台则无需回写
         best = max(grid, key=lambda r: (r["f1"], r["min_dice"], r["min_cos"]))
-        current_f1 = next(r["f1"] for r in grid
-                          if r["min_dice"] == g.MIN_DICE and r["min_cos"] == g.MIN_COS)
-        print(f"\n最优：min_dice={best['min_dice']:.2f} min_cos={best['min_cos']:.2f} "
-              f"(F1={best['f1']:.3f})；当前常量 F1={current_f1:.3f}，"
-              f"{'已处于最优平台，无需调整' if current_f1 == best['f1'] else '建议 --apply 回写'}")
+        current_f1 = next(r["f1"] for r in grid if r["min_dice"] == g.MIN_DICE and r["min_cos"] == g.MIN_COS)
+        print(
+            f"\n最优：min_dice={best['min_dice']:.2f} min_cos={best['min_cos']:.2f} "
+            f"(F1={best['f1']:.3f})；当前常量 F1={current_f1:.3f}，"
+            f"{'已处于最优平台，无需调整' if current_f1 == best['f1'] else '建议 --apply 回写'}"
+        )
         if args.apply and current_f1 < best["f1"]:
             apply_thresholds(best)
     else:

@@ -6,10 +6,13 @@
   - MemoryManager 行为用 _FakeClient（顺序响应）+ _FakeCollection（upsert 记录）
     + monkeypatch 替换内部方法，不依赖真实 Redis / ChromaDB / LLM
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
+
+import chromadb
 
 from memory.conversation_memory import (
     MemoryContext,
@@ -23,12 +26,13 @@ from memory.layered_store import LayeredStore, estimate_tokens
 
 # ── 纯逻辑：token 估算 ───────────────────────────────────────────────────────
 
+
 def test_estimate_tokens():
     assert estimate_tokens("") == 0
-    assert estimate_tokens("abc") == 1          # ASCII 4 字符 ≈ 1 token
+    assert estimate_tokens("abc") == 1  # ASCII 4 字符 ≈ 1 token
     assert estimate_tokens("abcd") == 1
     assert estimate_tokens("abcde") == 2
-    assert estimate_tokens("中文") == 2         # 中文 1 字符 ≈ 1 token
+    assert estimate_tokens("中文") == 2  # 中文 1 字符 ≈ 1 token
     assert estimate_tokens("你好 world") == 2 + 2  # 2 中文 + 5 ASCII
 
 
@@ -50,10 +54,10 @@ def test_memory_context_to_prompt_includes_facts():
 
 # ── 纯逻辑：L1/L3 分工去重 + L1 按需召回 ────────────────────────────────────
 
+
 def test_fact_subsumed_by_profile():
     """画像已覆盖的事实（条目是事实子串 / 事实全文在画像中）不落 L1。"""
-    profile = {"preferences": ["准备考研", "喜欢晚上学习"],
-               "entities": {"院系专业": ["通信工程"], "年级": ["大二"]}}
+    profile = {"preferences": ["准备考研", "喜欢晚上学习"], "entities": {"院系专业": ["通信工程"], "年级": ["大二"]}}
     # 偏好条目"准备考研"是事实的规范化子串 → 已覆盖（同一信息不双写）
     assert _fact_subsumed_by_profile("用户在准备考研", profile)
     # 实体条目"通信工程"是事实子串 → 已覆盖（身份归 L3 聚合画像）
@@ -85,6 +89,7 @@ def test_fact_relevant_to_query():
 
 # ── LayeredStore：L0 原文 ────────────────────────────────────────────────────
 
+
 def test_layered_raw_turns_and_trace(tmp_path):
     store = LayeredStore(str(tmp_path / "m.db"))
 
@@ -107,6 +112,7 @@ def test_layered_raw_turns_and_trace(tmp_path):
 
 
 # ── LayeredStore：L1 原子事实（去重 + 失效治理）──────────────────────────────
+
 
 def test_layered_facts_dedup_and_deactivate(tmp_path):
     store = LayeredStore(str(tmp_path / "m.db"))
@@ -135,6 +141,7 @@ def test_layered_facts_dedup_and_deactivate(tmp_path):
 
 # ── LayeredStore：L3 画像版本历史（可回滚）──────────────────────────────────
 
+
 def test_layered_profile_versions(tmp_path):
     store = LayeredStore(str(tmp_path / "m.db"))
 
@@ -158,6 +165,7 @@ def test_layered_profile_versions(tmp_path):
 
 # ── LayeredStore：refs 卸载落盘（100% 找回）─────────────────────────────────
 
+
 def test_layered_refs_roundtrip(tmp_path):
     store = LayeredStore(str(tmp_path / "m.db"))
 
@@ -175,6 +183,7 @@ def test_layered_refs_roundtrip(tmp_path):
 
 # ── LayeredStore：治理清理（prune）──────────────────────────────────────────
 
+
 def test_layered_prune(tmp_path):
     store = LayeredStore(str(tmp_path / "m.db"))
 
@@ -187,9 +196,7 @@ def test_layered_prune(tmp_path):
         for _i in range(3):
             await store.save_profile_version("u1", "{}", "r")
 
-        stats = await store.prune(
-            "u1", raw_ttl_days=0, ref_ttl_days=0, fact_ttl_days=0, max_profile_versions=1
-        )
+        stats = await store.prune("u1", raw_ttl_days=0, ref_ttl_days=0, fact_ttl_days=0, max_profile_versions=1)
         assert stats["raw"] == 1
         assert stats["refs"] == 1
         assert stats["facts"] == 1
@@ -201,6 +208,7 @@ def test_layered_prune(tmp_path):
 
 
 # ── 伪客户端（照 test_orchestrator._FakeClient 模式）────────────────────────
+
 
 class _FakeBlock:
     def __init__(self, text):
@@ -244,11 +252,28 @@ class _FakeCollection:
         self.upserts.append((ids, documents, metadatas))
 
 
-class _FakeEmbedding:
-    """伪 embedding function（避免加载真实 ONNX 模型）。"""
+class _FakeEmbedding(chromadb.EmbeddingFunction):
+    """伪 embedding function（避免加载真实 ONNX 模型）。
+
+    chroma 1.x 在 get_or_create 时校验 EF 的 name/get_config，必须走正式协议。
+    """
+
+    def __init__(self, dim: int = 8):
+        self.dim = dim
 
     def __call__(self, input):
-        return [[0.1] * 8 for _ in input]
+        return [[0.1] * self.dim for _ in input]
+
+    @staticmethod
+    def name() -> str:
+        return "fake_uniform_embedding"
+
+    def get_config(self) -> dict:
+        return {"dim": self.dim}
+
+    @classmethod
+    def build_from_config(cls, config):
+        return cls(dim=config.get("dim", 8))
 
 
 def _make_manager(tmp_path, monkeypatch):
@@ -257,8 +282,8 @@ def _make_manager(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cm, "get_embedder", lambda: _FakeEmbedding())
     mgr = MemoryManager(
-        redis_url="redis://localhost:6399/0",   # 不会真正连接
-        chroma_host="127.0.0.1",                # 连不上 → 本地嵌入式
+        redis_url="redis://localhost:6399/0",  # 不会真正连接
+        chroma_host="127.0.0.1",  # 连不上 → 本地嵌入式
         chroma_port=1,
         chroma_path=str(tmp_path / "chroma"),
         api_key="sk-test-not-used",
@@ -270,27 +295,31 @@ def _make_manager(tmp_path, monkeypatch):
 
 # ── update_profile：一次 LLM 调用双产出（画像 + 原子事实）───────────────────
 
+
 def test_update_profile_dual_output(tmp_path, monkeypatch):
     mgr = _make_manager(tmp_path, monkeypatch)
     fake_profile = _FakeCollection()
     mgr._profile = fake_profile
-    llm_output = json.dumps({
-        "preferences": ["喜欢晚上学习"],
-        "entities": {"院系专业": ["通信工程"], "年级": [], "校区": [], "诉求类型": []},
-        "facts": [
-            {"fact": "用户在准备考研", "category": "status"},
-            {"fact": "用户是通信工程学院大二学生", "category": "entity"},
-        ],
-    }, ensure_ascii=False)
+    llm_output = json.dumps(
+        {
+            "preferences": ["喜欢晚上学习"],
+            "entities": {"院系专业": ["通信工程"], "年级": [], "校区": [], "诉求类型": []},
+            "facts": [
+                {"fact": "用户在准备考研", "category": "status"},
+                {"fact": "用户是通信工程学院大二学生", "category": "entity"},
+            ],
+        },
+        ensure_ascii=False,
+    )
     # 两条相同响应：第二次调用用于验证"重复提炼去重"（本测试未写 L0，
     # 走"L0 缺失回退工作记忆全量"路径，两次提炼同一窗口，去重才真正被断言）
     mgr._client = _FakeClient(llm_output, llm_output)
 
     async def fake_wm(user_id, conv_id):
         return [
-            Message(role=MsgRole.USER, content="我最近在准备考研"),          # 画像信号
-            Message(role=MsgRole.ASSISTANT, content="已记录"),              # 助手消息
-            Message(role=MsgRole.USER, content="我是通信工程学院大二的"),     # 画像信号
+            Message(role=MsgRole.USER, content="我最近在准备考研"),  # 画像信号
+            Message(role=MsgRole.ASSISTANT, content="已记录"),  # 助手消息
+            Message(role=MsgRole.USER, content="我是通信工程学院大二的"),  # 画像信号
         ]
 
     async def fake_get_profile(user_id):
@@ -346,15 +375,19 @@ def test_update_profile_skips_without_signal(tmp_path, monkeypatch):
 
 # ── 增量提炼（对齐 TencentDB-Agent-Memory）：水位标记 + 增量区间 ────────────
 
+
 def test_update_profile_incremental_window(tmp_path, monkeypatch):
     """增量提炼：首次全量预热，之后只提炼水位之后的新消息（L0 原文区间）。"""
     mgr = _make_manager(tmp_path, monkeypatch)
     mgr._profile = _FakeCollection()
-    llm_output = json.dumps({
-        "preferences": ["喜欢晚上学习"],
-        "entities": {"院系专业": [], "年级": [], "校区": [], "诉求类型": []},
-        "facts": [{"fact": "用户在准备考研", "category": "status"}],
-    }, ensure_ascii=False)
+    llm_output = json.dumps(
+        {
+            "preferences": ["喜欢晚上学习"],
+            "entities": {"院系专业": [], "年级": [], "校区": [], "诉求类型": []},
+            "facts": [{"fact": "用户在准备考研", "category": "status"}],
+        },
+        ensure_ascii=False,
+    )
     mgr._client = _FakeClient(llm_output, llm_output)
 
     async def fake_wm(user_id, conv_id):
@@ -397,11 +430,14 @@ def test_update_profile_skips_no_increment(tmp_path, monkeypatch):
     """无增量消息（水位已到顶）时跳过 LLM——连续信号轮不再重复提炼。"""
     mgr = _make_manager(tmp_path, monkeypatch)
     mgr._profile = _FakeCollection()
-    llm_output = json.dumps({
-        "preferences": ["喜欢晚上学习"],
-        "entities": {"院系专业": [], "年级": [], "校区": [], "诉求类型": []},
-        "facts": [{"fact": "用户在准备考研", "category": "status"}],
-    }, ensure_ascii=False)
+    llm_output = json.dumps(
+        {
+            "preferences": ["喜欢晚上学习"],
+            "entities": {"院系专业": [], "年级": [], "校区": [], "诉求类型": []},
+            "facts": [{"fact": "用户在准备考研", "category": "status"}],
+        },
+        ensure_ascii=False,
+    )
     mgr._client = _FakeClient(llm_output, llm_output)
 
     async def fake_wm(user_id, conv_id):
@@ -431,17 +467,18 @@ def test_extract_mark_persistence(tmp_path):
     store = LayeredStore(str(tmp_path / "memory.db"))
 
     async def scenario():
-        assert await store.get_extract_mark("u1", "c1") == 0   # 无记录 → 0
+        assert await store.get_extract_mark("u1", "c1") == 0  # 无记录 → 0
         await store.set_extract_mark("u1", "c1", 7)
         assert await store.get_extract_mark("u1", "c1") == 7
-        await store.set_extract_mark("u1", "c1", 9)            # UPSERT 推进
+        await store.set_extract_mark("u1", "c1", 9)  # UPSERT 推进
         assert await store.get_extract_mark("u1", "c1") == 9
-        assert await store.get_extract_mark("u1", "c2") == 0   # 新会话独立水位
+        assert await store.get_extract_mark("u1", "c2") == 0  # 新会话独立水位
 
     asyncio.run(scenario())
 
 
 # ── get_context：分层融合 + 场景优先 + memory_trace ─────────────────────────
+
 
 def test_get_context_layers_and_trace(tmp_path, monkeypatch):
     mgr = _make_manager(tmp_path, monkeypatch)
@@ -450,8 +487,7 @@ def test_get_context_layers_and_trace(tmp_path, monkeypatch):
         return [Message(role=MsgRole.USER, content="今天有空吗")]
 
     async def fake_search(user_id, query):
-        return (["场景：用户咨询选课与校园卡办理", "普通历史片段"],
-                {"scenario": 1, "segment": 1})
+        return (["场景：用户咨询选课与校园卡办理", "普通历史片段"], {"scenario": 1, "segment": 1})
 
     async def fake_facts(user_id):
         return [{"fact": "用户在准备考研"}, {"fact": "用户在南校区"}]
@@ -506,8 +542,8 @@ def test_get_context_facts_not_duplicate_profile(tmp_path, monkeypatch):
 
     async def fake_facts(user_id):
         return [
-            {"fact": "用户喜欢晚上学习"},                    # 与画像偏好逐字重复（存量数据）
-            {"fact": "用户决定周三下午去校医院补办校园卡"},    # 画像未覆盖
+            {"fact": "用户喜欢晚上学习"},  # 与画像偏好逐字重复（存量数据）
+            {"fact": "用户决定周三下午去校医院补办校园卡"},  # 画像未覆盖
         ]
 
     async def fake_profile(user_id):

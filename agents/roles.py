@@ -27,6 +27,7 @@ v5 收口：不再有 QAAgent / ExecutorAgent 两个职责 Agent 类，也没有
 Agentic RAG 工具循环（LLM 自主决定是否检索/调用工具）、上下文卸载、
 Skill 渐进披露都在 BaseAgent/TaskAgent 中实现，是五条主线中 Agentic RAG 的执行体。
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -56,7 +57,8 @@ logger = logging.getLogger(__name__)
 
 class WritePolicy(Enum):
     """Task Run 执行策略（由 Task 的 action 决定，不再有角色实体）。"""
-    READ_ONLY     = "read_only"      # QUERY/问候/投诉等：只读工具面
+
+    READ_ONLY = "read_only"  # QUERY/问候/投诉等：只读工具面
     WRITE_ALLOWED = "write_allowed"  # REQUEST：可暴露满足策略的写工具
 
 
@@ -75,12 +77,14 @@ class AgentStats:
     保留成功率/延迟/P50/P95/在途作为 Profile 级在线指标；
     不再有 routing_score / monitor_penalty —— 实例间不存在路由竞争。
     """
-    total:     int   = 0
-    success:   int   = 0
-    total_ms:  float = 0.0
-    in_flight: int   = 0
+
+    total: int = 0
+    success: int = 0
+    total_ms: float = 0.0
+    in_flight: int = 0
     _latencies: deque[float] = field(
-        default_factory=lambda: deque(maxlen=200), repr=False,
+        default_factory=lambda: deque(maxlen=200),
+        repr=False,
     )
 
     @property
@@ -113,20 +117,20 @@ class AgentStats:
 
 @dataclass
 class AgentResponse:
-    content:     str
-    success:     bool
-    agent_type:  str = ""  # 展示标签：任务领域值（task.domain.value），空 = task_agent
-    task_id:     str = ""  # 所属 Task（Agent Run 边界标识）
-    confidence:  float = 1.0
-    latency_ms:  float = 0.0
-    tools_used:  List[str] = field(default_factory=list)  # 本次调用的工具（供过程可视化）
+    content: str
+    success: bool
+    agent_type: str = ""  # 展示标签：任务领域值（task.domain.value），空 = task_agent
+    task_id: str = ""  # 所属 Task（Agent Run 边界标识）
+    confidence: float = 1.0
+    latency_ms: float = 0.0
+    tools_used: List[str] = field(default_factory=list)  # 本次调用的工具（供过程可视化）
     tool_evidence: List[Dict[str, Any]] = field(default_factory=list)
     profile: str = "fast"
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
-    offloaded_chars: int = 0   # 上下文卸载：从上下文移出的字符数
-    saved_tokens: int = 0      # 上下文卸载：按估算口径省下的 token 数
+    offloaded_chars: int = 0  # 上下文卸载：从上下文移出的字符数
+    saved_tokens: int = 0  # 上下文卸载：按估算口径省下的 token 数
 
     @property
     def label(self) -> str:
@@ -149,11 +153,11 @@ class BaseAgent:
         memory_store: Optional[LayeredStore] = None,
     ):
         self._client = client
-        self._model  = model
+        self._model = model
         self._skill_manager = skill_manager
-        self._tool_manager  = tool_manager
-        self._memory_store  = memory_store  # 上下文卸载落盘（refs 表），可由编排器注入
-        self._runtime = None                # Agent Runtime（编排器注入；None 时钩子全部 no-op）
+        self._tool_manager = tool_manager
+        self._memory_store = memory_store  # 上下文卸载落盘（refs 表），可由编排器注入
+        self._runtime = None  # Agent Runtime（编排器注入；None 时钩子全部 no-op）
         self.profile = profile or ExecutionProfile(
             name=ProfileName.FAST,
             model=model,
@@ -163,7 +167,7 @@ class BaseAgent:
             use_rewrite=False,
             use_rerank=False,
         )
-        self.stats   = AgentStats()
+        self.stats = AgentStats()
 
     def _gateway(self) -> Optional[Any]:
         """统一模型调用入口（从注入的 Runtime 取；无 Runtime 时返回 None 走直接调用）。"""
@@ -243,9 +247,15 @@ class BaseAgent:
             from core.tracing import span
 
             async with span("agent_handle", profile=tag):
-                (content, tools_used, tool_evidence,
-                 input_tokens, output_tokens,
-                 offloaded_chars, saved_tokens) = await self._call_llm(req, on_event=on_event)
+                (
+                    content,
+                    tools_used,
+                    tool_evidence,
+                    input_tokens,
+                    output_tokens,
+                    offloaded_chars,
+                    saved_tokens,
+                ) = await self._call_llm(req, on_event=on_event)
             # 引用是检索链路的执行后置条件，不依赖模型是否自觉把 URL 抄进正文。
             # v7 升级为 claim-aware hybrid citation（core/grounding.py）：剥离
             # 模型自觉 [n] → 原子事实拆分 → 事实性过滤 → 全证据候选匹配
@@ -262,11 +272,15 @@ class BaseAgent:
                 # 模糊区间 Claim 的轻量蕴含判定（ECHOGUIDE_GROUNDING_ENTAILMENT=1
                 # 启用；默认关闭时 Judge fail-open，模糊 Claim 按 insufficient 兜底）
                 judge = LLMEntailmentJudge(
-                    client=self._client, model=self._model, gateway=self._gateway(),
+                    client=self._client,
+                    model=self._model,
+                    gateway=self._gateway(),
                 )
                 async with span("grounding", n_evidence=len(tool_evidence)):
                     annotated = await annotate_citations(
-                        content, tool_evidence, entailment_judge=judge,
+                        content,
+                        tool_evidence,
+                        entailment_judge=judge,
                     )
                 content = annotated["text"]
                 sources = build_source_section(tool_evidence, annotated["citation_indices"])
@@ -356,11 +370,13 @@ class BaseAgent:
                     continue  # Action 层策略：查询/问候等动作下不暴露执行类工具
                 if capability is not None and name in write_tools and name not in capability:
                     continue  # Task 级写能力：写工具必须在 Planner 声明的白名单内
-                tools.append({
-                    "name": name,
-                    "description": tool.description,
-                    "input_schema": tool.schema,
-                })
+                tools.append(
+                    {
+                        "name": name,
+                        "description": tool.description,
+                        "input_schema": tool.schema,
+                    }
+                )
         if self._skill_manager is not None:
             for tool_def in self._skill_manager.tool_definitions():
                 name = tool_def["name"]
@@ -410,7 +426,9 @@ class BaseAgent:
             return "query_campus_info", {"category": "auto", "keyword": message}
         return None
 
-    async def _call_llm(self, req: Any, on_event: Optional[Any] = None) -> tuple[str, List[str], List[Dict[str, Any]], int, int, int, int]:
+    async def _call_llm(
+        self, req: Any, on_event: Optional[Any] = None
+    ) -> tuple[str, List[str], List[Dict[str, Any]], int, int, int, int]:
         """
         工具调用循环：
           1. 首次调用带 tools（function calling），让 Agent 自主决定是否检索知识库
@@ -426,6 +444,7 @@ class BaseAgent:
         兼容性：若上游（如部分 DeepSeek 兼容端点）不支持 tools 参数，
         自动降级为普通调用，保证主链路可用。
         """
+
         def _clean(s: str) -> str:
             return s.encode("utf-8", errors="ignore").decode("utf-8")
 
@@ -459,10 +478,12 @@ class BaseAgent:
             data, error = await self._execute_tool(name, params, req)
             if error is None:
                 tools_used.append(name)
-                messages.append({
-                    "role": "user",
-                    "content": f"[系统已查询结构化工具 {name}]\n{self._clean_text(data)}",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"[系统已查询结构化工具 {name}]\n{self._clean_text(data)}",
+                    }
+                )
                 messages.append({"role": "assistant", "content": "好的，我会结合结构化查询结果回答。"})
             else:
                 detail = f"operational preflight {name} failed: {error}"
@@ -486,8 +507,8 @@ class BaseAgent:
 
         input_tokens = 0
         output_tokens = 0
-        offloaded_chars = 0   # 上下文卸载统计（从上下文移出的字符数）
-        saved_tokens = 0      # 上下文卸载统计（估算省下的 token）
+        offloaded_chars = 0  # 上下文卸载统计（从上下文移出的字符数）
+        saved_tokens = 0  # 上下文卸载统计（估算省下的 token）
         hit_tool_use_at_limit = False
         # 工具轮次预算（分级）：Fast 路径用便宜模型可多试几轮，Deep 路径留给复杂
         # 任务；无 Runtime policy 时回落类常量。无进展检测：连续 stagnant_limit
@@ -541,21 +562,28 @@ class BaseAgent:
                     # 都视为检索证据（Verifier 不再特殊认识 knowledge_search，
                     # 新增检索类工具自动获得引用校验与出口 Grounding 能力）。
                     if isinstance(data, list) and any(
-                        isinstance(item, dict) and (item.get("title") or item.get("source_url"))
-                        for item in data
+                        isinstance(item, dict) and (item.get("title") or item.get("source_url")) for item in data
                     ):
-                        tool_evidence.extend({
-                            "tool": name,
-                            "title": item.get("title", ""),
-                            "source_url": item.get("source_url", ""),
-                            "updated_at": item.get("updated_at", ""),
-                            "content": str(item.get("content", ""))[:800],
-                        } for item in data if isinstance(item, dict))
+                        tool_evidence.extend(
+                            {
+                                "tool": name,
+                                "title": item.get("title", ""),
+                                "source_url": item.get("source_url", ""),
+                                "updated_at": item.get("updated_at", ""),
+                                "content": str(item.get("content", ""))[:800],
+                            }
+                            for item in data
+                            if isinstance(item, dict)
+                        )
                     if on_event is not None:
-                        await on_event({
-                            "type": "tool", "name": name, "status": "done",
-                            "titles": self._tool_result_titles(data),
-                        })
+                        await on_event(
+                            {
+                                "type": "tool",
+                                "name": name,
+                                "status": "done",
+                                "titles": self._tool_result_titles(data),
+                            }
+                        )
                     # 上下文卸载：超长结果落盘 refs 表，上下文只留摘要行 + 索引
                     # （需要时可沿 refs/{id} 100% 找回，代价是上下文里的 token 显著下降）。
                     # Skill 正文（load_skill）例外：规范全文必须留在上下文，不做卸载。
@@ -567,14 +595,11 @@ class BaseAgent:
                         and name not in {"load_skill", "load_skill_resource"}
                     ):
                         try:
-                            ref_id = await self._memory_store.save_ref(
-                                req.user_id, req.conv_id, name, tool_text
-                            )
+                            ref_id = await self._memory_store.save_ref(req.user_id, req.conv_id, name, tool_text)
                             char_len = len(tool_text)
                             full_estimate = estimate_tokens(tool_text)
                             tool_text = (
-                                f"{tool_text[:OFFLOAD_SUMMARY_CHARS]}..."
-                                f"[完整结果 refs/{ref_id}，共 {char_len} 字符]"
+                                f"{tool_text[:OFFLOAD_SUMMARY_CHARS]}...[完整结果 refs/{ref_id}，共 {char_len} 字符]"
                             )
                             offloaded_chars += char_len - len(tool_text)
                             # estimate_tokens 只接受文本：按"全量 token - 摘要行 token"
@@ -583,11 +608,13 @@ class BaseAgent:
                         except Exception as ex:
                             # 落盘失败（磁盘/权限等）：保持全量回填，不阻断主链路
                             logger.warning(f"上下文卸载落盘失败，保持全量回填: {ex}")
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": getattr(block, "id", ""),
-                        "content": tool_text if tool_text is not None else f"工具执行失败: {error}",
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": getattr(block, "id", ""),
+                            "content": tool_text if tool_text is not None else f"工具执行失败: {error}",
+                        }
+                    )
                 messages.append({"role": "user", "content": tool_results})
                 if req.state is not None:
                     req.state.tool_round_count += 1  # 真实工具调用轮次（一轮 = 一次工具批次）
@@ -597,9 +624,7 @@ class BaseAgent:
                 if round_sig is not None and round_sig == last_round_sig:
                     stagnant_rounds += 1
                     if stagnant_rounds >= stagnant_limit:
-                        logger.warning(
-                            f"TaskAgent({tag}) 连续 {stagnant_rounds} 轮无进展（{round_sig}），强制收尾"
-                        )
+                        logger.warning(f"TaskAgent({tag}) 连续 {stagnant_rounds} 轮无进展（{round_sig}），强制收尾")
                         hit_tool_use_at_limit = True
                         break
                 else:
@@ -609,9 +634,7 @@ class BaseAgent:
                 continue
 
             # 正常结束：提取文本
-            text = "".join(
-                b.text for b in resp.content if getattr(b, "type", "") == "text"
-            ).strip()
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
             return text, tools_used, tool_evidence, input_tokens, output_tokens, offloaded_chars, saved_tokens
 
         # 达到工具轮次上限仍有工具请求：用普通调用收尾，保证一定有最终答复
@@ -624,28 +647,38 @@ class BaseAgent:
                 if isinstance(last_content, list):
                     pending = [b for b in last_content if getattr(b, "type", "") == "tool_use"]
                     if pending:
-                        messages.append({
-                            "role": "user",
-                            "content": [
-                                {"type": "tool_result",
-                                 "tool_use_id": getattr(b, "id", ""),
-                                 "content": "工具调用轮次已达上限，未执行。"}
-                                for b in pending
-                            ],
-                        })
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": getattr(b, "id", ""),
+                                        "content": "工具调用轮次已达上限，未执行。",
+                                    }
+                                    for b in pending
+                                ],
+                            }
+                        )
             system = self._build_system_prompt(req)
             # 收尾调用同样经统一入口（流式时逐 token 推送，避免割裂体验）
             resp = await self._call_model(req, system, messages, [], on_event)
             used_in, used_out = self._usage(resp)
             input_tokens += used_in
             output_tokens += used_out
-            text = "".join(
-                b.text for b in resp.content if getattr(b, "type", "") == "text"
-            ).strip()
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
             if text:
                 return text, tools_used, tool_evidence, input_tokens, output_tokens, offloaded_chars, saved_tokens
 
-        return "抱歉，处理超时或模型未返回有效内容，请稍后重试。", tools_used, tool_evidence, input_tokens, output_tokens, offloaded_chars, saved_tokens
+        return (
+            "抱歉，处理超时或模型未返回有效内容，请稍后重试。",
+            tools_used,
+            tool_evidence,
+            input_tokens,
+            output_tokens,
+            offloaded_chars,
+            saved_tokens,
+        )
 
     async def _stream_llm(self, system: str, messages: List[Dict], tools: List[Dict], on_event: Any):
         """
@@ -696,9 +729,7 @@ class BaseAgent:
                 logger.warning(f"TaskAgent({tag}) 尝试调用权限外工具 {name}，已拒绝")
                 return None, f"工具 {name} 不在当前执行权限范围内"
             if req.action is not None and not action_allows_tool(req.action, name, write_tools):
-                logger.warning(
-                    f"TaskAgent({tag}) 在 {req.action.value} 动作下尝试调用工具 {name}，已拒绝"
-                )
+                logger.warning(f"TaskAgent({tag}) 在 {req.action.value} 动作下尝试调用工具 {name}，已拒绝")
                 return None, f"工具 {name} 不在当前意图（{req.action.value}）的权限范围内"
             runtime = getattr(self, "_runtime", None)
             if runtime is not None and req.state is not None:
@@ -715,12 +746,14 @@ class BaseAgent:
                         error = f"技能 {skill_name} 不存在或已停用"
                     else:
                         from core.tracing import span
+
                         async with span("skill_load", skill=skill_name):
                             data = self._skill_manager.load_skill(skill_name)
                 else:
                     skill_name = str(params.get("skill_name", ""))
                     relative_path = str(params.get("path", ""))
                     from core.tracing import span
+
                     async with span("skill_resource_load", skill=skill_name, path=relative_path):
                         data = self._skill_manager.load_skill_resource(skill_name, relative_path)
             if runtime is not None and req.state is not None:
@@ -729,9 +762,13 @@ class BaseAgent:
                 req,
                 name,
                 SimpleNamespace(
-                    success=error is None, data=data, error=error,
+                    success=error is None,
+                    data=data,
+                    error=error,
                     latency_ms=(time.monotonic() - started) * 1000,
-                    cached=False, reranked=False, fallback_used=False,
+                    cached=False,
+                    reranked=False,
+                    fallback_used=False,
                 ),
                 (time.monotonic() - started) * 1000,
             )
@@ -748,9 +785,7 @@ class BaseAgent:
             return None, f"工具 {name} 不在当前执行权限范围内"
         # Run 级写策略（防御纵深）：非 REQUEST 动作即使误判也拒绝写工具。
         if write_policy != WritePolicy.WRITE_ALLOWED and name in write_tools:
-            logger.warning(
-                f"TaskAgent({tag}) 在 {write_policy.value} 策略下尝试调用写工具 {name}，已拒绝"
-            )
+            logger.warning(f"TaskAgent({tag}) 在 {write_policy.value} 策略下尝试调用写工具 {name}，已拒绝")
             return None, f"工具 {name} 不在当前执行策略（{write_policy.value}）权限范围内"
         # 权限边界（防御纵深）：公共工具层内工具由 Action 层策略把关（见下）；
         # 实例级 _tool_allowlist 覆盖（测试/定制）之外的工具直接拒绝。
@@ -761,9 +796,7 @@ class BaseAgent:
         # Action 层权限（防御纵深，与 _build_tools 暴露层一致）：
         # 查询/问候等动作下，LLM 即使声明了执行类工具也直接拒绝
         if req.action is not None and not action_allows_tool(req.action, name, write_tools):
-            logger.warning(
-                f"TaskAgent({tag}) 在 {req.action.value} 动作下尝试调用工具 {name}，已拒绝"
-            )
+            logger.warning(f"TaskAgent({tag}) 在 {req.action.value} 动作下尝试调用工具 {name}，已拒绝")
             return None, f"工具 {name} 不在当前意图（{req.action.value}）的权限范围内"
         from core.tracing import span
 
@@ -806,10 +839,15 @@ class BaseAgent:
             return
         data = getattr(result, "data", None)
         result_count = len(data) if isinstance(data, list | tuple | set | dict) else int(data is not None)
-        evidence_count = sum(
-            1 for item in data
-            if isinstance(item, dict) and (item.get("title") or item.get("source_url") or item.get("content"))
-        ) if isinstance(data, list) else 0
+        evidence_count = (
+            sum(
+                1
+                for item in data
+                if isinstance(item, dict) and (item.get("title") or item.get("source_url") or item.get("content"))
+            )
+            if isinstance(data, list)
+            else 0
+        )
         state.record_tool_call(
             tool_name=name,
             task_id=str(getattr(req, "task_id", "")),
@@ -853,6 +891,7 @@ class BaseAgent:
             await runtime.fire_tool_before(req.state, name, params)
         try:
             from core.tracing import span
+
             async with span("tool_call", tool=name, auto_retrieve=True):
                 result = await self._tool_manager.call(
                     name,
@@ -870,7 +909,8 @@ class BaseAgent:
         finally:
             if runtime is not None and getattr(req, "state", None) is not None:
                 await runtime.fire_tool_after(
-                    req.state, name,
+                    req.state,
+                    name,
                     result.data if result is not None and result.success else None,
                     result.error if result is not None and not result.success else None,
                 )
@@ -890,10 +930,7 @@ class BaseAgent:
         ]
         if not evidence:
             return "", []
-        lines = [
-            f"[{i + 1}] {item.get('title', '')!s}: {item.get('content', '')!s}"
-            for i, item in enumerate(items)
-        ]
+        lines = [f"[{i + 1}] {item.get('title', '')!s}: {item.get('content', '')!s}" for i, item in enumerate(items)]
         text = "[系统已检索资料，请严格基于以下资料回答：]\n" + "\n".join(lines)
         return text, evidence
 
@@ -928,6 +965,7 @@ class BaseAgent:
             return ""
         if not isinstance(value, str):
             import json as _json
+
             try:
                 value = _json.dumps(value, ensure_ascii=False)
             except Exception:
@@ -977,6 +1015,7 @@ class BaseAgent:
                 prompt = f"{prompt}\n\n[意图指引]\n{guidance}"
 
         from personal.time_context import build_time_context
+
         prompt = f"{prompt}\n\n{build_time_context()}"
         return prompt
 

@@ -18,6 +18,7 @@
     时比较预测 action —— 与 IntentEvaluator 约定一致，两组分开统计。
   - Accuracy / Macro-F1 / per-class P/R/F1 由 evaluation/evaluator.py 纯 Python 计算。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -93,13 +94,20 @@ async def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", default=None, help="输出 JSON 路径（默认 data/eval/intent_<mode>.json）")
     parser.add_argument("--cases", default=None, help="标注集路径（默认 evaluation/cases/intent_cases.json）")
+    parser.add_argument(
+        "--holdout-cases",
+        default=None,
+        help="独立 holdout 标注集路径（默认 evaluation/cases/intent_cases_holdout.json，存在即评）",
+    )
     args = parser.parse_args()
 
     cases = load_intent_cases(args.cases)
     cfg = _llm_config()
     if args.ablation == "full" and not cfg["api_key"]:
-        print("[错误] full 级联需要 LLM 配置：设置 ANTHROPIC_API_KEY（或 ECHOGUIDE_FAST_API_KEY）。"
-              "离线档位请用 --ablation pattern_only / no_llm。")
+        print(
+            "[错误] full 级联需要 LLM 配置：设置 ANTHROPIC_API_KEY（或 ECHOGUIDE_FAST_API_KEY）。"
+            "离线档位请用 --ablation pattern_only / no_llm。"
+        )
         return 2
 
     recognizer = IntentRecognizer(
@@ -119,7 +127,25 @@ async def main() -> int:
     if held_out:
         report["held_out"] = await _run(held_out, recognizer)
 
-    out = pathlib.Path(args.out) if args.out else pathlib.Path(__file__).resolve().parents[1] / "data" / "eval" / f"intent_{args.ablation}.json"
+    # 独立 holdout 标注集：存在即默认评测（benchmark_report 的头条数字取自它）。
+    # 旧默认只评 train —— 对参与调参/阈值标定的数据子集的成绩会系统性偏乐观。
+    holdout_path = (
+        pathlib.Path(args.holdout_cases)
+        if args.holdout_cases
+        else pathlib.Path(__file__).resolve().parent / "cases" / "intent_cases_holdout.json"
+    )
+    if holdout_path.exists():
+        holdout_payload = json.loads(holdout_path.read_text(encoding="utf-8"))
+        holdout_cases = holdout_payload.get("cases", holdout_payload)
+        if holdout_cases:
+            report["holdout"] = await _run(holdout_cases, recognizer)
+            report["holdout_cases_file"] = holdout_path.name
+
+    out = (
+        pathlib.Path(args.out)
+        if args.out
+        else pathlib.Path(__file__).resolve().parents[1] / "data" / "eval" / f"intent_{args.ablation}.json"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 

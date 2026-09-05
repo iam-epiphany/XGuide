@@ -9,6 +9,7 @@
   - 西电作息时间表（上午 8:30-12:00；下午秋冬春 14:00 / 夏季 14:30；晚上 19:00 起）
   - 2026-2027 学年校历：秋季学期 2026-09-07 开学，共 19 周
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime

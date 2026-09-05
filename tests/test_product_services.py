@@ -1,4 +1,5 @@
 """P0/P1 产品服务：Today 空闲时间、稳定画像与通知→计划闭环的底层保证。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +8,7 @@ import hashlib
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from api import state
 from api.routers.memory import get_schedule
@@ -19,12 +21,34 @@ from tools import with_service
 from tools.campus_event_tool import get_campus_event_handler, query_campus_events_handler
 
 
+@pytest.fixture(autouse=True)
+def _no_semantic_layer(monkeypatch):
+    """本模块固化纯关键词契约（嵌入模型不可用的世界线）。
+
+    语义相关度加成/语义聚类是可选增强，其行为由 test_llm_product_features.py
+    用确定性嵌入替身单独覆盖；在这里禁用后，断言不依赖本地模型缓存状态。
+    """
+    monkeypatch.setattr("campus.semantic.get_embedder", lambda: None)
+
+
+class _AllowRobots:
+    """robots 替身：测试不做真实网络请求，全部放行。"""
+
+    async def allowed(self, client, url, user_agent):
+        return True
+
+
 def test_free_time_today_and_editable_todo(tmp_path):
     service = PersonalService(PersonalStore(str(tmp_path / "product.db")))
-    asyncio.run(service.import_courses("u", [
-        {"course": "高数", "day_of_week": 0, "start_time": "09:00", "end_time": "10:30", "weeks": "1-16"},
-        {"course": "英语", "day_of_week": 0, "start_time": "14:00", "end_time": "15:30", "weeks": "1-16"},
-    ]))
+    asyncio.run(
+        service.import_courses(
+            "u",
+            [
+                {"course": "高数", "day_of_week": 0, "start_time": "09:00", "end_time": "10:30", "weeks": "1-16"},
+                {"course": "英语", "day_of_week": 0, "start_time": "14:00", "end_time": "15:30", "weeks": "1-16"},
+            ],
+        )
+    )
     free = asyncio.run(service.free_time("u", "2026-09-07"))
     assert free["free_periods"] == [
         {"start_time": "08:00", "end_time": "09:00"},
@@ -39,17 +63,26 @@ def test_free_time_today_and_editable_todo(tmp_path):
 
 def test_profile_filters_public_event_and_keeps_source(tmp_path):
     store = PersonalStore(str(tmp_path / "radar.db"))
-    radar = CampusRadar(store)
+    radar = CampusRadar(store, robots=_AllowRobots())
     profile = asyncio.run(store.save_profile("u", {"education": "本科生", "interests": ["奖学金"], "college": ""}))
     url = "https://example.xidian.edu.cn/notice/1"
-    inserted = radar._save_events_sync([{
-        "fingerprint": hashlib.sha256(url.encode()).hexdigest(),
-        "title": "关于开展本科生国家奖学金申请工作的通知",
-        "summary": "本科生请于 2026年9月15日 前提交申请材料。",
-        "body": "本科生请于 2026年9月15日 前提交申请材料。",
-        "source_name": "本科生院", "source_category": "academic", "source_url": url,
-        "published_at": "2026-09-01", "deadline": "2026-09-15", "targets": ["本科生"], "actions": ["申请", "提交"],
-    }])
+    inserted = radar._save_events_sync(
+        [
+            {
+                "fingerprint": hashlib.sha256(url.encode()).hexdigest(),
+                "title": "关于开展本科生国家奖学金申请工作的通知",
+                "summary": "本科生请于 2026年9月15日 前提交申请材料。",
+                "body": "本科生请于 2026年9月15日 前提交申请材料。",
+                "source_name": "本科生院",
+                "source_category": "academic",
+                "source_url": url,
+                "published_at": "2026-09-01",
+                "deadline": "2026-09-15",
+                "targets": ["本科生"],
+                "actions": ["申请", "提交"],
+            }
+        ]
+    )
     assert inserted == 1
     inbox = asyncio.run(radar.inbox("u", profile))
     assert len(inbox) == 1
@@ -71,7 +104,9 @@ def test_html_adapter_filters_notice_links_and_preserves_listing_date():
         transport = httpx.MockTransport(lambda request: httpx.Response(200, text=html))
         async with httpx.AsyncClient(transport=transport) as client:
             adapter = HtmlNoticeAdapter(
-                name="本科生院", category="academic", listing_url="https://jwc.example/tzgg.htm",
+                name="本科生院",
+                category="academic",
+                listing_url="https://jwc.example/tzgg.htm",
                 include_url_patterns=(r"/info/1012/\d+\.htm$",),
             )
             return await adapter.discover(client)
@@ -116,20 +151,27 @@ def test_cpipc_adapter_splits_public_schedule_into_competitions_with_deadlines()
 
 def test_inbox_does_not_deliver_events_after_their_deadline(tmp_path):
     store = PersonalStore(str(tmp_path / "expired-competition.db"))
-    radar = CampusRadar(store)
+    radar = CampusRadar(store, robots=_AllowRobots())
     today = datetime.now().astimezone().date()
     expired, active = (today - timedelta(days=1)).isoformat(), (today + timedelta(days=1)).isoformat()
     events = []
     for suffix, deadline in (("expired", expired), ("active", active)):
         url = f"https://cpipc.example/competition/{suffix}"
-        events.append({
-            "fingerprint": hashlib.sha256(url.encode()).hexdigest(),
-            "title": f"中国研究生人工智能创新大赛-{suffix}",
-            "summary": f"研究生报名截止：{deadline.replace('-', '年', 1).replace('-', '月', 1)}日",
-            "body": "研究生竞赛报名", "source_name": "中国研究生创新实践系列大赛",
-            "source_category": "competition", "source_url": url, "published_at": today.isoformat(),
-            "deadline": deadline, "targets": ["研究生"], "actions": ["报名"],
-        })
+        events.append(
+            {
+                "fingerprint": hashlib.sha256(url.encode()).hexdigest(),
+                "title": f"中国研究生人工智能创新大赛-{suffix}",
+                "summary": f"研究生报名截止：{deadline.replace('-', '年', 1).replace('-', '月', 1)}日",
+                "body": "研究生竞赛报名",
+                "source_name": "中国研究生创新实践系列大赛",
+                "source_category": "competition",
+                "source_url": url,
+                "published_at": today.isoformat(),
+                "deadline": deadline,
+                "targets": ["研究生"],
+                "actions": ["报名"],
+            }
+        )
     assert radar._save_events_sync(events) == 2
 
     inbox = asyncio.run(radar.inbox("u", {"education": "研究生", "interests": ["竞赛"]}))
@@ -139,15 +181,26 @@ def test_inbox_does_not_deliver_events_after_their_deadline(tmp_path):
 
 def test_inbox_ttl_and_personal_deletion_do_not_recreate_notifications(tmp_path):
     store = PersonalStore(str(tmp_path / "inbox-ttl.db"))
-    radar = CampusRadar(store, inbox_ttl_hours=48)
+    radar = CampusRadar(store, inbox_ttl_hours=48, robots=_AllowRobots())
     today = datetime.now().astimezone().date()
     url = "https://notice.example/ttl"
-    radar._save_events_sync([{
-        "fingerprint": hashlib.sha256(url.encode()).hexdigest(), "title": "本科生奖学金申请",
-        "summary": "本科生奖学金申请", "body": "本科生奖学金申请", "source_name": "本科生院",
-        "source_category": "academic", "source_url": url, "published_at": today.isoformat(),
-        "deadline": (today + timedelta(days=7)).isoformat(), "targets": ["本科生"], "actions": ["申请"],
-    }])
+    radar._save_events_sync(
+        [
+            {
+                "fingerprint": hashlib.sha256(url.encode()).hexdigest(),
+                "title": "本科生奖学金申请",
+                "summary": "本科生奖学金申请",
+                "body": "本科生奖学金申请",
+                "source_name": "本科生院",
+                "source_category": "academic",
+                "source_url": url,
+                "published_at": today.isoformat(),
+                "deadline": (today + timedelta(days=7)).isoformat(),
+                "targets": ["本科生"],
+                "actions": ["申请"],
+            }
+        ]
+    )
     profile = {"education": "本科生", "interests": ["奖学金"]}
     event = asyncio.run(radar.inbox("u", profile))[0]
     assert event["expires_at"] > event["updated_at"]
@@ -162,7 +215,9 @@ def test_inbox_ttl_and_personal_deletion_do_not_recreate_notifications(tmp_path)
 
 
 def test_empty_profile_receives_recent_public_notices(tmp_path):
-    radar = CampusRadar(PersonalStore(str(tmp_path / "recent-notices.db")), adapters=[_FakeAdapter()])
+    radar = CampusRadar(
+        PersonalStore(str(tmp_path / "recent-notices.db")), adapters=[_FakeAdapter()], robots=_AllowRobots()
+    )
     asyncio.run(radar.refresh())
 
     events = asyncio.run(radar.inbox("u", {}))
@@ -178,10 +233,21 @@ def test_empty_profile_receives_recent_public_notices(tmp_path):
 
 def test_schedule_endpoint_keeps_full_schedule_outside_current_week(tmp_path, monkeypatch):
     service = PersonalService(PersonalStore(str(tmp_path / "schedule.db")))
-    asyncio.run(service.import_courses("u", [{
-        "course": "高等数学", "day_of_week": 0, "start_time": "08:30", "end_time": "10:05",
-        "location": "B-101", "weeks": "1-16",
-    }]))
+    asyncio.run(
+        service.import_courses(
+            "u",
+            [
+                {
+                    "course": "高等数学",
+                    "day_of_week": 0,
+                    "start_time": "08:30",
+                    "end_time": "10:05",
+                    "location": "B-101",
+                    "weeks": "1-16",
+                }
+            ],
+        )
+    )
     monkeypatch.setattr(state, "_personal_service", service)
 
     response = asyncio.run(get_schedule(user=SimpleNamespace(id="u")))
@@ -220,16 +286,22 @@ class _PartiallyFailingAdapter(_FakeAdapter):
 class _EvidenceExtractor:
     async def extract(self, title, body):
         return {
-            "event_type": "奖学金", "summary": body, "deadline": "2026-09-15", "targets": ["本科生"],
-            "requirements": ["本科生"], "materials": ["成绩证明", "获奖材料"],
-            "actions": ["填写申请表", "提交申请"], "location": "学生工作处", "extraction": "test",
+            "event_type": "奖学金",
+            "summary": body,
+            "deadline": "2026-09-15",
+            "targets": ["本科生"],
+            "requirements": ["本科生"],
+            "materials": ["成绩证明", "获奖材料"],
+            "actions": ["填写申请表", "提交申请"],
+            "location": "学生工作处",
+            "extraction": "test",
         }
 
 
 def test_incremental_event_sync_and_action_plan_provenance(tmp_path):
     store = PersonalStore(str(tmp_path / "incremental.db"))
     adapter = _FakeAdapter()
-    radar = CampusRadar(store, adapters=[adapter], extractor=_EvidenceExtractor())
+    radar = CampusRadar(store, adapters=[adapter], extractor=_EvidenceExtractor(), robots=_AllowRobots())
     first = asyncio.run(radar.refresh())
     assert first["new_events"] == 1
     second = asyncio.run(radar.refresh())
@@ -249,7 +321,9 @@ def test_incremental_event_sync_and_action_plan_provenance(tmp_path):
 
 
 def test_refresh_keeps_syncing_when_one_notice_page_fails(tmp_path):
-    radar = CampusRadar(PersonalStore(str(tmp_path / "partial.db")), adapters=[_PartiallyFailingAdapter()])
+    radar = CampusRadar(
+        PersonalStore(str(tmp_path / "partial.db")), adapters=[_PartiallyFailingAdapter()], robots=_AllowRobots()
+    )
     result = asyncio.run(radar.refresh())
     assert result["checked"] == 2
     assert result["new_events"] == 1
@@ -259,21 +333,31 @@ def test_refresh_keeps_syncing_when_one_notice_page_fails(tmp_path):
 
 def test_agent_tool_reads_same_event_store_as_inbox(tmp_path):
     store = PersonalStore(str(tmp_path / "tool.db"))
-    radar = CampusRadar(store, adapters=[_FakeAdapter()], extractor=_EvidenceExtractor())
+    radar = CampusRadar(store, adapters=[_FakeAdapter()], extractor=_EvidenceExtractor(), robots=_AllowRobots())
     asyncio.run(radar.refresh())
     personal = PersonalService(store)
     asyncio.run(store.save_profile("u", {"education": "本科生", "interests": ["奖学金"]}))
     manager = MCPToolManager(api_key="test", model="test")
-    manager.register(Tool(
-        name="query_campus_events", effect=ToolEffect.READ, cache_ttl=0,
-        description="test", schema={"type": "object"},
-        handler=with_service(query_campus_events_handler, campus_radar=radar, personal_service=personal),
-    ))
-    manager.register(Tool(
-        name="get_campus_event", effect=ToolEffect.READ, cache_ttl=0,
-        description="test", schema={"type": "object"},
-        handler=with_service(get_campus_event_handler, campus_radar=radar),
-    ))
+    manager.register(
+        Tool(
+            name="query_campus_events",
+            effect=ToolEffect.READ,
+            cache_ttl=0,
+            description="test",
+            schema={"type": "object"},
+            handler=with_service(query_campus_events_handler, campus_radar=radar, personal_service=personal),
+        )
+    )
+    manager.register(
+        Tool(
+            name="get_campus_event",
+            effect=ToolEffect.READ,
+            cache_ttl=0,
+            description="test",
+            schema={"type": "object"},
+            handler=with_service(get_campus_event_handler, campus_radar=radar),
+        )
+    )
     result = asyncio.run(manager.call("query_campus_events", {"query": "奖学金"}, {"user_id": "u"}))
     assert result.success
     assert result.data["events"][0]["title"] == "国家奖学金申请"

@@ -6,8 +6,14 @@ import process from 'node:process'
 const baseUrl = process.env.ECHOGUIDE_DEMO_URL || 'http://localhost:8088'
 const apiUrl = process.env.ECHOGUIDE_API_URL || `${baseUrl}/api`
 const outputDir = path.resolve(process.cwd(), '..', 'assets', 'readme')
-const username = 'echoguide_demo'
-const password = 'EchoGuideDemo2026!'
+// 演示账号凭据必须从环境变量注入：硬编码进仓库的话，任何能读到仓库
+// 且能访问同一部署的人都可以登录该共享账号、清空其个人数据。
+const username = process.env.ECHOGUIDE_DEMO_USER
+const password = process.env.ECHOGUIDE_DEMO_PASSWORD
+if (!username || !password) {
+  console.error('[capture-demos] 缺少环境变量 ECHOGUIDE_DEMO_USER / ECHOGUIDE_DEMO_PASSWORD')
+  process.exit(1)
+}
 
 await fs.mkdir(outputDir, { recursive: true })
 const browser = await chromium.launch({

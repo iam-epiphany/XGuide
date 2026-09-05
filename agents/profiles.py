@@ -4,6 +4,7 @@
 职责：把「复杂度判定 + 置信度 + 关键词信号」映射为可执行的
 模型/预算/检索深度配置。只做决策与描述，不执行（执行在 roles.py）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ class ProfileName(Enum):
 @dataclass(frozen=True)
 class ExecutionProfile:
     """真实执行配置：模型、思考模式、生成预算与检索深度。"""
+
     name: ProfileName
     model: str
     max_tokens: int
@@ -46,9 +48,22 @@ def select_profile_name(
     if any(marker in message for marker in deep_markers):
         return ProfileName.DEEP
     deterministic_markers = (
-        "加权", "平均成绩", "校园卡", "请假", "在读证明", "缓考",
-        "校园网", "vpn", "统一身份认证", "教务系统", "课表", "待办",
-        "校车", "天气", "图书馆", "体育馆",
+        "加权",
+        "平均成绩",
+        "校园卡",
+        "请假",
+        "在读证明",
+        "缓考",
+        "校园网",
+        "vpn",
+        "统一身份认证",
+        "教务系统",
+        "课表",
+        "待办",
+        "校车",
+        "天气",
+        "图书馆",
+        "体育馆",
     )
     if any(marker in message.lower() for marker in deterministic_markers):
         return ProfileName.FAST

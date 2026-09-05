@@ -11,16 +11,20 @@
   - 所有方法 async，内部经 asyncio.to_thread 执行同步实现，避免阻塞事件循环。
   - 每次操作新建连接（本地文件开销可忽略），天然规避线程共享连接问题。
 """
+
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 import json
 import logging
 import os
 import pathlib
 import sqlite3
 from typing import Any, Dict, List, Optional
+
+from core.sqlite import sqlite_session
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,8 @@ CREATE TABLE IF NOT EXISTS todos (
     source_event_id INTEGER,
     source_url TEXT,
     source_deadline TEXT,
-    action_plan_id TEXT
+    action_plan_id TEXT,
+    evidence TEXT                  -- 行动步骤的原文依据（LLM 起草步骤的溯源字段）
 );
 CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id);
 
@@ -57,10 +62,21 @@ CREATE TABLE IF NOT EXISTS student_profiles (
     user_id       TEXT PRIMARY KEY,
     college       TEXT NOT NULL DEFAULT '',
     major         TEXT NOT NULL DEFAULT '',
-    grade          TEXT NOT NULL DEFAULT '',
+    grade         TEXT NOT NULL DEFAULT '',
     education     TEXT NOT NULL DEFAULT '',
     interests_json TEXT NOT NULL DEFAULT '[]',
     updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS llm_briefings (
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,               -- today / inbox / free_advice
+    day         TEXT NOT NULL,               -- YYYY-MM-DD（本地时区）
+    fingerprint TEXT NOT NULL,               -- 输入数据的规范化哈希：数据变了才重新生成
+    content     TEXT NOT NULL,
+    model       TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, kind, day)
 );
 """
 
@@ -80,10 +96,15 @@ class PersonalStore:
 
     # ── 基础 ──────────────────────────────────────────────────────────────────
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+    @contextmanager
+    def _connect(self):
+        """短生命周期连接（WAL/busy_timeout/commit/close 见 core.sqlite.session）。
+
+        原实现返回裸连接，`with self._connect()` 只 commit 不 close，依赖
+        CPython 引用计数回收文件句柄；现在与 layered_store 语义统一。
+        """
+        with sqlite_session(self.db_path) as conn:
+            yield conn
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -91,8 +112,11 @@ class PersonalStore:
             # 兼容 P0 已部署的数据库：CREATE TABLE 不会为既有表补列。
             columns = {row[1] for row in conn.execute("PRAGMA table_info(todos)")}
             for name, definition in {
-                "source_event_id": "INTEGER", "source_url": "TEXT",
-                "source_deadline": "TEXT", "action_plan_id": "TEXT",
+                "source_event_id": "INTEGER",
+                "source_url": "TEXT",
+                "source_deadline": "TEXT",
+                "action_plan_id": "TEXT",
+                "evidence": "TEXT",
             }.items():
                 if name not in columns:
                     conn.execute(f"ALTER TABLE todos ADD COLUMN {name} {definition}")
@@ -146,9 +170,7 @@ class PersonalStore:
 
     def _count_schedule_sync(self, user_id: str) -> int:
         with self._connect() as conn:
-            return conn.execute(
-                "SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,)
-            ).fetchone()[0]
+            return conn.execute("SELECT COUNT(*) FROM schedule WHERE user_id = ?", (user_id,)).fetchone()[0]
 
     async def clear_schedule(self, user_id: str) -> None:
         await self._run(self._clear_schedule_sync, user_id)
@@ -169,29 +191,57 @@ class PersonalStore:
         source_url: Optional[str] = None,
         source_deadline: Optional[str] = None,
         action_plan_id: Optional[str] = None,
+        evidence: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return await self._run(self._add_todo_sync, user_id, content, kind, due_at, source_event_id, source_url, source_deadline, action_plan_id)
+        return await self._run(
+            self._add_todo_sync,
+            user_id,
+            content,
+            kind,
+            due_at,
+            source_event_id,
+            source_url,
+            source_deadline,
+            action_plan_id,
+            evidence,
+        )
 
     def _add_todo_sync(
-        self, user_id: str, content: str, kind: str, due_at: Optional[str], source_event_id: Optional[int], source_url: Optional[str], source_deadline: Optional[str], action_plan_id: Optional[str],
+        self,
+        user_id: str,
+        content: str,
+        kind: str,
+        due_at: Optional[str],
+        source_event_id: Optional[int],
+        source_url: Optional[str],
+        source_deadline: Optional[str],
+        action_plan_id: Optional[str],
+        evidence: Optional[str],
     ) -> Dict[str, Any]:
         created = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
         with self._connect() as conn:
             cur = conn.execute(
-                """INSERT INTO todos (user_id, content, kind, due_at, created_at, source_event_id, source_url, source_deadline, action_plan_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (user_id, content, kind, due_at or None, created, source_event_id, source_url, source_deadline, action_plan_id),
+                """INSERT INTO todos (user_id, content, kind, due_at, created_at, source_event_id, source_url, source_deadline, action_plan_id, evidence)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    user_id,
+                    content,
+                    kind,
+                    due_at or None,
+                    created,
+                    source_event_id,
+                    source_url,
+                    source_deadline,
+                    action_plan_id,
+                    evidence,
+                ),
             )
-            return self._todo_row_to_dict(
-                conn.execute(
-                    "SELECT * FROM todos WHERE id = ?", (cur.lastrowid,)
-                ).fetchone()
-            )
+            return self._todo_row_to_dict(conn.execute("SELECT * FROM todos WHERE id = ?", (cur.lastrowid,)).fetchone())
 
     async def list_todos(
         self,
         user_id: str,
-        status: str = "open",          # open / done / all
+        status: str = "open",  # open / done / all
         kinds: Optional[List[str]] = None,
         due_before: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
@@ -226,9 +276,7 @@ class PersonalStore:
 
     def _get_todo_sync(self, user_id: str, todo_id: int) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM todos WHERE id = ? AND user_id = ?", (todo_id, user_id)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM todos WHERE id = ? AND user_id = ?", (todo_id, user_id)).fetchone()
         return self._todo_row_to_dict(row) if row else None
 
     async def set_todo_done(self, user_id: str, todo_id: int, done: bool = True) -> bool:
@@ -250,19 +298,27 @@ class PersonalStore:
 
     def _delete_todo_sync(self, user_id: str, todo_id: int) -> bool:
         with self._connect() as conn:
-            cur = conn.execute(
-                "DELETE FROM todos WHERE id = ? AND user_id = ?", (todo_id, user_id)
-            )
+            cur = conn.execute("DELETE FROM todos WHERE id = ? AND user_id = ?", (todo_id, user_id))
         return cur.rowcount > 0
 
     async def update_todo(
-        self, user_id: str, todo_id: int, *, content: Optional[str] = None,
-        kind: Optional[str] = None, due_at: Optional[str] = None,
+        self,
+        user_id: str,
+        todo_id: int,
+        *,
+        content: Optional[str] = None,
+        kind: Optional[str] = None,
+        due_at: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         return await self._run(self._update_todo_sync, user_id, todo_id, content, kind, due_at)
 
     def _update_todo_sync(
-        self, user_id: str, todo_id: int, content: Optional[str], kind: Optional[str], due_at: Optional[str],
+        self,
+        user_id: str,
+        todo_id: int,
+        content: Optional[str],
+        kind: Optional[str],
+        due_at: Optional[str],
     ) -> Optional[Dict[str, Any]]:
         fields: List[str] = []
         args: List[Any] = []
@@ -280,7 +336,8 @@ class PersonalStore:
         args.extend([todo_id, user_id])
         with self._connect() as conn:
             cur = conn.execute(
-                f"UPDATE todos SET {', '.join(fields)} WHERE id = ? AND user_id = ?", args,
+                f"UPDATE todos SET {', '.join(fields)} WHERE id = ? AND user_id = ?",
+                args,
             )
             if cur.rowcount == 0:
                 return None
@@ -322,9 +379,51 @@ class PersonalStore:
                    ON CONFLICT(user_id) DO UPDATE SET college=excluded.college, major=excluded.major,
                    grade=excluded.grade, education=excluded.education, interests_json=excluded.interests_json,
                    updated_at=excluded.updated_at""",
-                (user_id, clean["college"], clean["major"], clean["grade"], clean["education"], json.dumps(clean["interests"], ensure_ascii=False), updated),
+                (
+                    user_id,
+                    clean["college"],
+                    clean["major"],
+                    clean["grade"],
+                    clean["education"],
+                    json.dumps(clean["interests"], ensure_ascii=False),
+                    updated,
+                ),
             )
         return clean
+
+    # ── LLM 简报缓存（按用户/类型/日期隔离，数据指纹变了才重新生成） ─────────
+
+    async def get_llm_briefing(self, user_id: str, kind: str, day: str, fingerprint: str) -> Optional[str]:
+        return await self._run(self._get_llm_briefing_sync, user_id, kind, day, fingerprint)
+
+    def _get_llm_briefing_sync(self, user_id: str, kind: str, day: str, fingerprint: str) -> Optional[str]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT content, fingerprint FROM llm_briefings WHERE user_id=? AND kind=? AND day=?",
+                (user_id, kind, day),
+            ).fetchone()
+        if row is None or row["fingerprint"] != fingerprint:
+            return None
+        return row["content"]
+
+    async def put_llm_briefing(self, user_id: str, kind: str, day: str, fingerprint: str, content: str, model: str = "") -> None:
+        await self._run(self._put_llm_briefing_sync, user_id, kind, day, fingerprint, content, model)
+
+    def _put_llm_briefing_sync(self, user_id: str, kind: str, day: str, fingerprint: str, content: str, model: str) -> None:
+        now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO llm_briefings (user_id, kind, day, fingerprint, content, model, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, kind, day) DO UPDATE SET fingerprint=excluded.fingerprint,
+                   content=excluded.content, model=excluded.model, updated_at=excluded.updated_at""",
+                (user_id, kind, day, fingerprint, content, model, now),
+            )
+            # 只保留最近 7 天：简报是可再生缓存，老数据没有保留价值（全表清理）
+            conn.execute(
+                "DELETE FROM llm_briefings WHERE day < ?",
+                ((datetime.now().astimezone() - timedelta(days=7)).strftime("%Y-%m-%d"),),
+            )
 
     @staticmethod
     def _todo_row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:

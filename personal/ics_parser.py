@@ -18,6 +18,7 @@
 重复课程展开为「每周几 + 起止时间 + 地点 + 教学周列表」：
   教学周 = 相对学期开始日（周一）的周序号，开学前的日期直接丢弃。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,7 +31,13 @@ logger = logging.getLogger(__name__)
 
 # 周缩写 → Python weekday（周一=0）
 WEEKDAY_MAP: Dict[str, int] = {
-    "MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6,
+    "MO": 0,
+    "TU": 1,
+    "WE": 2,
+    "TH": 3,
+    "FR": 4,
+    "SA": 5,
+    "SU": 6,
 }
 
 
@@ -41,12 +48,13 @@ class ICSError(ValueError):
 @dataclass
 class Course:
     """一条展开后的课程记录（与 SQLite schedule 表一一对应）。"""
-    course:      str
-    day_of_week: int          # 0=周一 … 6=周日
-    start_time:  str          # "08:30"
-    end_time:    str          # "10:05"
-    location:    str          # 上课地点，可能为空
-    weeks:       List[int] = field(default_factory=list)  # 教学周列表，空=所有周
+
+    course: str
+    day_of_week: int  # 0=周一 … 6=周日
+    start_time: str  # "08:30"
+    end_time: str  # "10:05"
+    location: str  # 上课地点，可能为空
+    weeks: List[int] = field(default_factory=list)  # 教学周列表，空=所有周
 
     def to_dict(self) -> Dict:
         return {
@@ -105,9 +113,7 @@ def _parse_datetime_value(value: str, utc_to_local: bool = True) -> datetime:
 
 def _parse_rrule(value: str) -> Dict[str, str]:
     """解析 RRULE 参数（如 FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20270117T235959Z）。"""
-    return dict(
-        part.split("=", 1) for part in value.split(";") if "=" in part
-    )
+    return dict(part.split("=", 1) for part in value.split(";") if "=" in part)
 
 
 def _week_num(d: date, semester_start: date) -> int:
@@ -244,8 +250,12 @@ def _parse_event(
         if "RRULE" in ev:
             # 每周重复：展开到 UNTIL / COUNT / 学期末
             weeks = _expand_recurrence(
-                start_dt, [dow], until, count,
-                semester_start, semester_weeks,
+                start_dt,
+                [dow],
+                until,
+                count,
+                semester_start,
+                semester_weeks,
             )
         else:
             # 单次事件：只在 DTSTART 所在周开课
@@ -254,12 +264,14 @@ def _parse_event(
         # 该课程在所有周都不开课 → 丢弃（可能是上学期遗留事件）
         if not weeks:
             continue
-        courses.append(Course(
-            course=(ev.get("SUMMARY") or "未命名课程").strip(),
-            day_of_week=dow,
-            start_time=start_dt.strftime("%H:%M"),
-            end_time=end_dt.strftime("%H:%M"),
-            location=(ev.get("LOCATION") or "").strip(),
-            weeks=weeks,
-        ))
+        courses.append(
+            Course(
+                course=(ev.get("SUMMARY") or "未命名课程").strip(),
+                day_of_week=dow,
+                start_time=start_dt.strftime("%H:%M"),
+                end_time=end_dt.strftime("%H:%M"),
+                location=(ev.get("LOCATION") or "").strip(),
+                weeks=weeks,
+            )
+        )
     return courses

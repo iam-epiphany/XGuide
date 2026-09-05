@@ -1,4 +1,5 @@
 """校务领域：版本化办事流程查询工具（公共工具层）。"""
+
 from __future__ import annotations
 
 import functools
@@ -33,11 +34,13 @@ async def query_affairs_process_handler(params: Dict[str, Any], context: Any) ->
     matches = []
     for item in processes:
         aliases = [str(alias).lower() for alias in item.get("aliases", [])]
-        haystack = " ".join([
-            str(item.get("id", "")),
-            str(item.get("name", "")),
-            *aliases,
-        ]).lower()
+        haystack = " ".join(
+            [
+                str(item.get("id", "")),
+                str(item.get("name", "")),
+                *aliases,
+            ]
+        ).lower()
         # aliases 已统一 lower，与 service/haystack 大小写一致
         if service in haystack or any(token in service for token in aliases):
             matches.append(item)

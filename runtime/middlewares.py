@@ -4,6 +4,7 @@
 每个中间件只做一件事，注册进 AgentRuntime 后即对整个链路生效；
 无状态设计（计数与缓存都落在 RunState 上），可安全复用同一实例。
 """
+
 from __future__ import annotations
 
 import logging
@@ -34,6 +35,7 @@ class TraceMiddleware(RuntimeMiddleware):
         """仅收尾由 Runtime 自己创建的 Trace，HTTP 请求拥有的 Trace 不受影响。"""
         if ctx.state.meta.pop("_runtime_owned_trace", False):
             from core.tracing import end_trace
+
             end_trace()
 
 

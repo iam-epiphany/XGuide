@@ -1,33 +1,89 @@
 name: ci
 
+# push 只在 main 上跑；其他分支通过 PR 触发，避免同一 commit 双跑
 on:
   push:
+    branches: [main]
   pull_request:
 
+# 同一分支/PR 有新推送时，取消仍在排队的旧运行
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  verify:
+  backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r requirements.txt -r requirements-dev.txt
-      # 代码质量检查（ruff）
-      - run: ruff check . --output-format=github
-      # 单元测试
-      - run: python -m pytest tests -q
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      # 格式与 lint 双检查（pyproject.toml [tool.ruff.format] 已声明格式约定）
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Ruff lint
+        run: ruff check . --output-format=github
+      # 类型检查（渐进式门禁，范围见 pyproject [tool.mypy].files；无参数运行以读取配置）
+      - name: Mypy
+        run: mypy
+      # 依赖漏洞审计：对已安装环境审计。chromadb（已升级 1.5.9）的 4 条已知
+      # 告警上游均未提供修复版本（见 requirements.txt 注释），显式豁免并跟踪；
+      # 出现新的 CVE 时本步会失败，需评估后升级或补充豁免。
+      - name: pip-audit
+        run: >-
+          pip-audit --progress-spinner off
+          --ignore-vuln CVE-2026-45830
+          --ignore-vuln CVE-2026-45831
+          --ignore-vuln CVE-2026-45833
+          --ignore-vuln PYSEC-2026-311
+      # 覆盖率范围见 pyproject.toml [tool.coverage.run]，仅报告不设门禁
+      - name: Tests with coverage
+        run: python -m pytest tests -q --cov --cov-report=term-missing:skip-covered
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - working-directory: frontend
+      - name: Install dependencies
+        working-directory: frontend
         run: npm ci
-      - working-directory: frontend
+      - name: Unit tests (vitest)
+        working-directory: frontend
+        run: npm test
+      - name: Dependency audit
+        working-directory: frontend
         run: npm audit --omit=dev --audit-level=high
-      - working-directory: frontend
+      - name: Build
+        working-directory: frontend
         run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
       # .env 被 .gitignore 排除不在仓库中；与 deploy.sh 一致，从示例文件生成
       # 后再校验 compose 配置（compose 内所有变量均有默认值兜底）
-      - run: cp .env.example .env && docker compose config --quiet
+      - name: Validate compose config
+        run: cp .env.example .env && docker compose config --quiet
+      # 验证后端镜像可构建；MODEL_PRELOAD=skip 跳过 ~740MB 模型预下载
+      - name: Build backend image (production)
+        run: docker build --target production --build-arg MODEL_PRELOAD=skip -t xguide-backend:ci .
+      - name: Build frontend image
+        run: docker build -t xguide-frontend:ci ./frontend

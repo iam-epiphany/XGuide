@@ -13,6 +13,7 @@ RAG 只能返回文本片段，无法计算；结构化 JSON + 内存加载最�
 数据缺失时（文件不存在或内容为空）查询返回空结果并附提示，不抛异常，
 保证对话链路不受影响 —— 缺失项会在 README 的「待补充公开信息」中登记。
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -32,6 +33,14 @@ _FILES = ["shuttle_schedule.json", "buildings.json", "venues.json", "library.jso
 def _default_data_dir() -> str:
     root = pathlib.Path(__file__).parent.parent.resolve()
     return os.getenv("ECHOGUIDE_PUBLIC_DATA_DIR", str(root / "data" / "public"))
+
+
+def _parse_time(value: str) -> Optional[dtime]:
+    """容错解析时刻表时间；人工维护的数据格式不可信。"""
+    try:
+        return dtime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 class CampusInfoStore:
@@ -105,32 +114,46 @@ class CampusInfoStore:
             next_dep: Optional[str] = None
             next_date: Optional[date] = None
             for dep in departures:
-                dep_t = dtime.fromisoformat(dep)
+                # 时刻表是人工维护的数据：单条时间格式坏（如缺前导零的非 ISO 写法）
+                # 只跳过该班次，不让整个校车查询崩溃
+                try:
+                    dep_t = dtime.fromisoformat(dep)
+                except ValueError:
+                    continue
                 if (today, dep_t) >= (now.date(), now.time()):
                     next_dep, next_date = dep, today
                     break
-            if next_dep is None and departures:
-                next_dep, next_date = departures[0], today + timedelta(days=1)
+            if next_dep is None:
+                valid_deps = [d for d in departures if _parse_time(d) is not None]
+                if valid_deps:
+                    next_dep, next_date = valid_deps[0], today + timedelta(days=1)
 
             if next_dep is None:
                 continue
             # 时刻表时间无时区语义；与 now 保持同一 tz（naive/aware 跟随入参）
+            next_dep_t = _parse_time(next_dep)
+            if next_dep_t is None:  # 理论不可达（上面已过滤），防御性兜底
+                continue
             dep_dt = datetime.combine(
-                next_date, dtime.fromisoformat(next_dep), tzinfo=now.tzinfo,
+                next_date,
+                next_dep_t,
+                tzinfo=now.tzinfo,
             )
             minutes = max(0, int((dep_dt - now).total_seconds() // 60))
-            results.append({
-                "route": name,
-                "direction": route.get("direction", name),
-                "pickup": route.get("pickup", ""),
-                "duration_min": route.get("duration_min"),
-                "next_departure": next_dep,
-                "date": next_date.isoformat(),
-                "minutes_left": minutes,
-                "is_today": next_date == today,
-                "last_departure": departures[-1] if departures else None,
-                "note": route.get("note", ""),
-            })
+            results.append(
+                {
+                    "route": name,
+                    "direction": route.get("direction", name),
+                    "pickup": route.get("pickup", ""),
+                    "duration_min": route.get("duration_min"),
+                    "next_departure": next_dep,
+                    "date": next_date.isoformat(),
+                    "minutes_left": minutes,
+                    "is_today": next_date == today,
+                    "last_departure": departures[-1] if departures else None,
+                    "note": route.get("note", ""),
+                }
+            )
 
         if not results:
             return {"available": True, "message": "未找到该方向的班车信息，请确认方向（南→北 / 北→南）。"}
@@ -199,18 +222,37 @@ class CampusInfoStore:
     def library_info(self) -> Dict[str, Any]:
         """图书馆开放时间（多个馆/自习区）。"""
         libs = self._data.get("library.json", [])
-        return {"libraries": libs} if libs else {"available": False, "message": "图书馆开放时间数据暂未录入，请以图书馆现场公告为准。"}
+        return (
+            {"libraries": libs}
+            if libs
+            else {"available": False, "message": "图书馆开放时间数据暂未录入，请以图书馆现场公告为准。"}
+        )
 
     def _freshness(self, filename: str) -> Dict[str, Any]:
         """公开数据缺少官方来源或时效字段时明确降级，避免被误当作实时信息。"""
         raw = self._data.get(filename)
         records = raw.get("routes", []) if isinstance(raw, dict) else (raw or [])
         if isinstance(raw, dict) and raw.get("source_url"):
-            return {"source_url": raw.get("source_url"), "checked_at": raw.get("checked_at"), "valid_from": raw.get("valid_from"), "warning": None}
+            return {
+                "source_url": raw.get("source_url"),
+                "checked_at": raw.get("checked_at"),
+                "valid_from": raw.get("valid_from"),
+                "warning": None,
+            }
         sample = records[0] if records and isinstance(records[0], dict) else {}
         if sample.get("source_url") and sample.get("checked_at"):
-            return {"source_url": sample.get("source_url"), "checked_at": sample.get("checked_at"), "valid_from": sample.get("valid_from"), "warning": None}
-        return {"source_url": None, "checked_at": None, "valid_from": None, "warning": "该结构化数据未附可核验官方来源与时效字段，仅作演示参考，请以学校官方公告为准。"}
+            return {
+                "source_url": sample.get("source_url"),
+                "checked_at": sample.get("checked_at"),
+                "valid_from": sample.get("valid_from"),
+                "warning": None,
+            }
+        return {
+            "source_url": None,
+            "checked_at": None,
+            "valid_from": None,
+            "warning": "该结构化数据未附可核验官方来源与时效字段，仅作演示参考，请以学校官方公告为准。",
+        }
 
     def search(self, category: str, keyword: Optional[str] = None) -> Dict[str, Any]:
         """统一查询入口（MCP 工具 / REST API 共用）。"""

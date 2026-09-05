@@ -8,6 +8,7 @@
 工具权限的另一半（Run 级写策略：非 REQUEST 一律 READ_ONLY）在
 roles.py 的 write_policy_for。
 """
+
 from __future__ import annotations
 
 from typing import Dict, FrozenSet, Optional
@@ -61,24 +62,21 @@ ACTION_GUIDANCE: Dict[IntentAction, str] = {
 # 与风格；具体 SOP、工具调用时机与权限均由 Skill / Runtime / Action 管理。
 DOMAIN_PERSONA: Dict[IntentDomain, str] = {
     IntentDomain.ACADEMIC: (
-        "当前问题属于学业支持语境，关注课程、考试、成绩与培养路径。"
-        "回答应准确、结构清晰，并区分校级规则与学院规则。"
+        "当前问题属于学业支持语境，关注课程、考试、成绩与培养路径。回答应准确、结构清晰，并区分校级规则与学院规则。"
     ),
     IntentDomain.CAMPUS_LIFE: (
         "当前问题属于校园生活语境，关注地点、校区、开放时段和日常服务。"
         "回答应便于到达和执行，优先给出清晰的空间与时间信息。"
     ),
     IntentDomain.AFFAIRS: (
-        "当前问题属于校务办事语境，关注流程、材料、部门与时效。"
-        "回答应按办理顺序组织，并明确哪些信息需要向官方确认。"
+        "当前问题属于校务办事语境，关注流程、材料、部门与时效。回答应按办理顺序组织，并明确哪些信息需要向官方确认。"
     ),
     IntentDomain.IT_HELP: (
         "当前问题属于校园 IT 支持语境，关注现象、影响范围和可复现条件。"
         "回答应由低风险检查逐步收敛，并清楚区分自助处理与人工支持。"
     ),
     IntentDomain.PERSONAL: (
-        "当前问题属于个人事务语境，关注用户自己的课程、待办与时间安排。"
-        "回答应围绕时间顺序、优先级和用户当前数据展开。"
+        "当前问题属于个人事务语境，关注用户自己的课程、待办与时间安排。回答应围绕时间顺序、优先级和用户当前数据展开。"
     ),
     IntentDomain.OTHER: (
         "当前问题不属于校园领域（如通用知识、编程、GitHub 等外部工具问题）："

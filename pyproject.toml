@@ -3,33 +3,37 @@ name = "xguide"
 version = "0.1.0"
 description = "校园个人 Agent - Agent Runtime / Harness"
 requires-python = ">=3.12"
+# 依赖版本与 requirements.txt 保持一致（requirements.txt 是安装事实源，
+# 注明选型理由；此处同步钉版，避免 pip install . 解析出已知损坏的组合，
+# 如 chromadb 0.5.x 与 tokenizers 0.22.x 不兼容）。
 dependencies = [
-    "anthropic>=0.109.0",
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "pydantic>=2.10.0",
-    "python-multipart>=0.0.10",
-    "redis>=5.2.0",
-    "chromadb>=0.5.20",
-    "tokenizers>=0.20.0",
-    "onnxruntime>=1.28.0",
-    "numpy>=2.0.0",
-    "firecrawl-anydoc>=0.1.0",
-    "prometheus-client>=0.21.0",
-    "httpx>=0.28.0",
-    "python-dotenv>=1.0.0",
+    "anthropic==0.109.1",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.32.1",
+    "pydantic==2.10.3",
+    "python-multipart==0.0.31",
+    "redis==5.2.1",
+    "chromadb==1.5.9",
+    "tokenizers==0.20.3",
+    "onnxruntime==1.28.0",
+    "numpy==2.3.5",
+    "firecrawl-anydoc==0.1.8",
+    "prometheus-client==0.21.1",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2.0",
-    "httpx>=0.28.0",
-    "PyJWT>=2.8.0",
-    "PyYAML>=6.0.0",
-    "pypdf>=6.11.0",
-    "reportlab>=5.0.0",
-    "python-docx>=1.2.0",
-    "ruff>=0.8.0",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "httpx==0.28.1",
+    "PyYAML==6.0.2",
+    "pypdf==6.16.1",
+    "reportlab==5.0.0",
+    "python-docx==1.2.0",
+    "ruff==0.16.6",
+    "pip-audit==2.10.1",
 ]
 
 [tool.ruff]
@@ -86,6 +90,7 @@ ignore = [
     "RUF001", # 允许字符串中的全角标点（中文字符串正常需求）
     "UP006",  # 暂不强制类型注解现代化（避免大规模改动）
     "UP007",  # 暂不强制类型注解现代化
+    "UP045",  # 同上：Optional[X] → X | None 暂不强制
     "UP035",  # 暂不强制 typing 模块现代化
     "G004",   # 允许 logging 使用 f-string（常见用法）
     "W505",   # 文档行长度限制
@@ -97,13 +102,6 @@ fixable = ["ALL"]
 unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
-# 测试文件中允许更宽松的规则
-"tests/**" = [
-    "S101",   # assert 使用
-    "ARG",    # 未使用的参数
-    "PLR2004", # 魔法值
-]
-
 # 评测脚本允许 print
 "evaluation/**" = [
     "T201",   # print 使用
@@ -113,11 +111,6 @@ unfixable = []
 # 导入排序配置
 known-first-party = ["api", "agents", "core", "memory", "mcp", "tools", "auth", "personal", "campus", "monitor", "runtime"]
 force-sort-within-sections = true
-
-[tool.ruff.lint.flake8-annotations]
-# 类型注解配置
-suppress-dummy-args = true
-suppress-none-returning = true
 
 [tool.ruff.format]
 # 格式化配置
@@ -129,3 +122,37 @@ line-ending = "auto"
 [tool.ruff.lint.pycodestyle]
 # docstring 相关
 max-doc-length = 100
+
+[tool.coverage.run]
+# 覆盖率统计范围（CI 中 pytest --cov 使用；本地裸跑 pytest 不受影响）
+source = [
+    "api",
+    "agents",
+    "auth",
+    "campus",
+    "core",
+    "echoguide_guard",
+    "memory",
+    "mcp",
+    "monitor",
+    "personal",
+    "runtime",
+    "tools",
+]
+omit = [
+    "*/__main__.py",
+]
+
+[tool.mypy]
+# 渐进式采用：只门禁 files 里的模块（新代码保持类型干净）。
+# 扩大范围前先清零目标模块的错误，避免带病纳管。
+python_version = "3.12"
+ignore_missing_imports = true
+explicit_package_bases = true
+namespace_packages = true
+mypy_path = "."
+files = [
+    "core/sqlite.py",
+    "campus/robots.py",
+    "runtime",
+]

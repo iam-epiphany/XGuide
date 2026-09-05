@@ -8,6 +8,7 @@
 加载函数与 evaluation/evaluator.py 的数据结构对齐：
   IntentTestCase / RetrievalTestCase / EndToEndEvaluator 的 dialog case 字典。
 """
+
 from __future__ import annotations
 
 import json
@@ -25,11 +26,13 @@ def load_intent_cases(path: str | pathlib.Path | None = None) -> List[IntentTest
     data = json.loads(p.read_text(encoding="utf-8"))
     cases = []
     for item in data["cases"]:
-        cases.append(IntentTestCase(
-            message=str(item["message"]),
-            expected_intent=str(item["expected"]),
-            context=item.get("context") or None,
-        ))
+        cases.append(
+            IntentTestCase(
+                message=str(item["message"]),
+                expected_intent=str(item["expected"]),
+                context=item.get("context") or None,
+            )
+        )
     return cases
 
 

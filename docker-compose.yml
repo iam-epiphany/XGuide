@@ -1,32 +1,40 @@
-# EchoGuide 智能客服系统 — Docker Compose 服务编排
+# XGuide 校园个人 Agent — Docker Compose 服务编排
 # 四层记忆（L0-L3 金字塔）：SQLite 原文/事实 + ChromaDB 场景/画像 + Redis 工作记忆
+#
+# 网络分层：
+#   edge     —— 对外入口（nginx、直连 API 的 echoguide）
+#   internal —— 纯内部服务（redis/chromadb/prometheus），不发布宿主机端口、
+#               不路由外网。需要本机调试内部服务时用
+#               `docker compose exec redis redis-cli -a "$REDIS_PASSWORD"` 等命令。
+#
+# REDIS_PASSWORD 为必填项（:? 语法），缺失时 compose 直接报错而不是静默回落弱密码。
+
+# 镜像 tag 按 digest 钉死（digest 取自 docker image inspect 的 RepoDigests）。
+# 升级：docker pull <image>:<new-tag> 后更新 tag 与 digest。
 
 services:
 
   # ── Redis 缓存（工作记忆）────────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: echoguide-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-echoguide123}
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:?REDIS_PASSWORD 未设置（参考 .env.example）}"
     volumes:
       - redis-data:/data
     restart: unless-stopped
     networks:
-      - echoguide-network
+      - internal
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-echoguide123}", "ping"]
+      # ${REDIS_PASSWORD} 由 compose 在宿主侧插值后进入容器 shell
+      test: ["CMD-SHELL", "redis-cli -a \"${REDIS_PASSWORD:?REDIS_PASSWORD 未设置}\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ── ChromaDB 向量数据库（情景记忆 + 用户画像）────────────────────────────────
   chromadb:
-    image: chromadb/chroma:0.5.23
+    image: chromadb/chroma:1.5.9@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
     container_name: echoguide-chromadb
-    ports:
-      - "8001:8000"
     environment:
       - IS_PERSISTENT=TRUE
       - PERSIST_DIRECTORY=/chroma/chroma
@@ -35,25 +43,24 @@ services:
       - chromadb-data:/chroma/chroma
     restart: unless-stopped
     networks:
-      - echoguide-network
+      - internal
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v1/heartbeat || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v2/heartbeat || exit 1"]  # chroma 1.x REST API 为 v2（v1 已 410）
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
 
-  # ── Prometheus 监控 ─────────────────────────────────────────────────────────
+  # ── Prometheus 监控（内网抓取 echoguide:8000/metrics，不经 nginx）─────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
     container_name: echoguide-prometheus
-    ports:
-      - "9090:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
+      # 不开 --web.enable-lifecycle：该 API 无鉴权，开了等于把重启/关闭
+      # Prometheus 的能力暴露给任何能访问该端口的人
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       # 告警规则目录（prometheus.yml 的 rule_files 指向 alerts/*.yml）
@@ -61,7 +68,7 @@ services:
       - prometheus-data:/prometheus
     restart: unless-stopped
     networks:
-      - echoguide-network
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
       interval: 30s
@@ -69,7 +76,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── EchoGuide 主应用 ─────────────────────────────────────────────────────────
+  # ── XGuide 主应用 ───────────────────────────────────────────────────────────
   echoguide:
     build:
       context: .
@@ -86,7 +93,7 @@ services:
       # 容器内必须用 8000/内部服务名，见 .env 头部说明）
       - TZ=Asia/Shanghai
       - API_PORT=8000
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-echoguide123}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD 未设置}@redis:6379/0
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - CHROMA_PERSIST_DIRECTORY=/app/data/chroma
@@ -107,7 +114,8 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - echoguide-network
+      - edge
+      - internal
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
       interval: 30s
@@ -131,7 +139,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - echoguide-network
+      - edge
     healthcheck:
       # 用 127.0.0.1 而非 localhost：alpine 中 localhost 解析为 ::1（IPv6），
       # 而 nginx 只监听 IPv4，会导致健康检查误判失败
@@ -143,11 +151,11 @@ services:
 
 # ── 网络 ────────────────────────────────────────────────────────────────────
 networks:
-  echoguide-network:
+  edge:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
+  internal:
+    driver: bridge
+    internal: true  # 不提供外网路由：纯内部服务即使被攻破也无法主动外连
 
 # ── 数据卷 ──────────────────────────────────────────────────────────────────
 volumes:

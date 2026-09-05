@@ -14,6 +14,7 @@ after_run 恒执行一次，保证观测闭环不因拦截而中断。
     state = RunState(request_id=req.request_id, message=req.message, ...)
     result = await runtime.run(state, core, on_event=on_event, services={"req": req})
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -62,9 +63,7 @@ class AgentRuntime:
         middlewares: Optional[List[RuntimeMiddleware]] = None,
     ):
         self.policy = policy or ExecutionPolicy.from_env()
-        self._chain = MiddlewareChain(
-            middlewares if middlewares is not None else default_middlewares(self.policy)
-        )
+        self._chain = MiddlewareChain(middlewares if middlewares is not None else default_middlewares(self.policy))
         # 统一模型调用入口：所有生产链路 LLM 调用经 gateway 进出
         # （before/after_model 钩子、usage 统计、预算检查、重试、Trace）。
         from runtime.model_gateway import ModelGateway
@@ -122,9 +121,7 @@ class AgentRuntime:
 
             async with span("runtime_run", request_id=state.request_id):
                 if self.policy.request_timeout_s > 0:
-                    result = await asyncio.wait_for(
-                        core(ctx), timeout=self.policy.request_timeout_s
-                    )
+                    result = await asyncio.wait_for(core(ctx), timeout=self.policy.request_timeout_s)
                 else:
                     result = await core(ctx)
             await self._chain.before_finish(ctx)
@@ -135,9 +132,7 @@ class AgentRuntime:
             return self._reject(state, ex)
         except TimeoutError:
             await self._chain.after_finish(ctx, None)
-            return self._reject(
-                state, RequestTimeoutError(self.policy.request_timeout_s)
-            )
+            return self._reject(state, RequestTimeoutError(self.policy.request_timeout_s))
         except Exception as ex:
             state.add_error(f"run: {ex}")
             logger.error(f"runtime run 失败: {ex}")
@@ -175,9 +170,7 @@ class AgentRuntime:
         on_event: Optional[Callable] = None,
         services: Optional[Dict[str, Any]] = None,
     ) -> None:
-        await self._chain.after_model(
-            self.ctx_for(state, on_event=on_event, services=services), response
-        )
+        await self._chain.after_model(self.ctx_for(state, on_event=on_event, services=services), response)
 
     async def fire_tool_before(
         self,
@@ -186,9 +179,7 @@ class AgentRuntime:
         tool_input: Any,
         on_event: Optional[Callable] = None,
     ) -> None:
-        await self._chain.before_tool(
-            self.ctx_for(state, on_event=on_event), tool_name, tool_input
-        )
+        await self._chain.before_tool(self.ctx_for(state, on_event=on_event), tool_name, tool_input)
 
     async def fire_tool_after(
         self,
@@ -198,6 +189,4 @@ class AgentRuntime:
         error: Optional[str],
         on_event: Optional[Callable] = None,
     ) -> None:
-        await self._chain.after_tool(
-            self.ctx_for(state, on_event=on_event), tool_name, result, error
-        )
+        await self._chain.after_tool(self.ctx_for(state, on_event=on_event), tool_name, result, error)

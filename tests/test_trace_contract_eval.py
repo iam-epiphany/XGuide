@@ -1,4 +1,5 @@
 """结构化 Trace、Task Contract 与 Eval 关联的离线回归测试。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,14 +24,19 @@ def _run(coro):
 
 def test_concurrent_runstate_traces_do_not_cross_requests():
     """contextvars + RunState 容器均按请求隔离，工具/决策不可串线。"""
+
     async def one(index: int):
         begin_trace(f"request-{index}")
         state = RunState(request_id=f"r-{index}")
         state.record_decision("intent", domain=f"domain-{index}")
         await asyncio.sleep(0.005 * (2 - index))
         state.record_tool_call(
-            tool_name=f"tool-{index}", task_id=f"t-{index}", tool_round=1,
-            success=True, result_count=index + 1, evidence_count=index,
+            tool_name=f"tool-{index}",
+            task_id=f"t-{index}",
+            tool_round=1,
+            success=True,
+            result_count=index + 1,
+            evidence_count=index,
         )
         record = end_trace().to_dict()
         return state, record
@@ -51,11 +57,15 @@ def test_tool_trace_records_runtime_result_shape():
     async def lookup(params, context):
         return [{"title": "证据", "content": params["query"]}]
 
-    manager.register(Tool(
-        name="lookup", description="lookup", handler=lookup,
-        schema={"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}},
-        effect=ToolEffect.READ,
-    ))
+    manager.register(
+        Tool(
+            name="lookup",
+            description="lookup",
+            handler=lookup,
+            schema={"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}}},
+            effect=ToolEffect.READ,
+        )
+    )
     profile = ExecutionProfile(ProfileName.FAST, "m", 128, False, 3, False, False)
     agent = TaskAgent(AsyncMock(), "m", None, manager, profile)
     req = Request(message="查资料", user_id="u", conv_id="c", task_id="t1")
@@ -67,18 +77,28 @@ def test_tool_trace_records_runtime_result_shape():
     trace = req.state.tool_trace
     assert len(trace) == 1
     assert trace[0] == {
-        "tool_name": "lookup", "task_id": "t1", "tool_round": 1,
-        "success": True, "error": None, "latency_ms": trace[0]["latency_ms"],
-        "cache_hit": False, "reranked": False, "fallback_used": False,
-        "result_count": 1, "evidence_count": 1,
+        "tool_name": "lookup",
+        "task_id": "t1",
+        "tool_round": 1,
+        "success": True,
+        "error": None,
+        "latency_ms": trace[0]["latency_ms"],
+        "cache_hit": False,
+        "reranked": False,
+        "fallback_used": False,
+        "result_count": 1,
+        "evidence_count": 1,
     }
 
 
 def test_task_contract_is_rule_completed_and_deterministically_verified():
     orchestrator = AgentOrchestrator(api_key="sk-test-not-used")
     req = Request(
-        message="帮我添加一个补办校园卡的待办", user_id="u", conv_id="c",
-        domain=IntentDomain.PERSONAL, action=IntentAction.REQUEST,
+        message="帮我添加一个补办校园卡的待办",
+        user_id="u",
+        conv_id="c",
+        domain=IntentDomain.PERSONAL,
+        action=IntentAction.REQUEST,
     )
     plan = _run(orchestrator._planner.plan(req, req.domain, req.action))
     task = plan.tasks[0]
@@ -87,8 +107,12 @@ def test_task_contract_is_rule_completed_and_deterministically_verified():
     assert "返回非空结果" in task.acceptance_criteria
 
     required = Task(
-        task_id="write", domain=IntentDomain.PERSONAL, goal="g", message="m",
-        action=IntentAction.REQUEST, required_tool="add_todo",
+        task_id="write",
+        domain=IntentDomain.PERSONAL,
+        goal="g",
+        message="m",
+        action=IntentAction.REQUEST,
+        required_tool="add_todo",
     )
     missing = verify_task_contract(required, AgentResponse(content="建议已给出", success=True))
     assert missing["passed"] is False
@@ -104,8 +128,11 @@ def test_decision_trace_contains_intent_plan_profile_tasks_and_verification():
     orchestrator._execute = fake_execute
     begin_trace("decision-test")
     req = Request(
-        message="校园卡怎么办理", user_id="u", conv_id="c",
-        domain=IntentDomain.AFFAIRS, action=IntentAction.QUERY,
+        message="校园卡怎么办理",
+        user_id="u",
+        conv_id="c",
+        domain=IntentDomain.AFFAIRS,
+        action=IntentAction.QUERY,
     )
     result = _run(orchestrator.run(req))
     record = end_trace().to_dict()
@@ -129,8 +156,11 @@ def test_parallel_decision_trace_uses_final_task_execution_snapshot():
     orchestrator._synthesizer.synthesize = fake_synthesize
     begin_trace("parallel-decision-test")
     req = Request(
-        message="食堂几点关门，顺便查下明天课表", user_id="u", conv_id="c",
-        domain=IntentDomain.CAMPUS_LIFE, action=IntentAction.QUERY,
+        message="食堂几点关门，顺便查下明天课表",
+        user_id="u",
+        conv_id="c",
+        domain=IntentDomain.CAMPUS_LIFE,
+        action=IntentAction.QUERY,
     )
     result = _run(orchestrator.run(req))
     record = end_trace().to_dict()
@@ -160,10 +190,17 @@ def test_runtime_owned_trace_is_closed_after_direct_orchestrator_run():
         return AgentResponse(content="ok", success=True, profile="fast")
 
     orchestrator._execute = fake_execute
-    result = _run(orchestrator.run(Request(
-        message="你好", user_id="u", conv_id="c",
-        domain=IntentDomain.OTHER, action=IntentAction.GREETING,
-    )))
+    result = _run(
+        orchestrator.run(
+            Request(
+                message="你好",
+                user_id="u",
+                conv_id="c",
+                domain=IntentDomain.OTHER,
+                action=IntentAction.GREETING,
+            )
+        )
+    )
     assert result.execution["runtime"]["trace_id"]
     assert current_trace() is None
 

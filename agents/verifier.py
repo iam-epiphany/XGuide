@@ -17,6 +17,7 @@ LLM 判定（可选，策略开关，仅 DEEP/执行路径）：一次廉价判�
 证据来源统一：Tool Evidence 由执行链从工具结果泛化采集（含标题/来源 URL
 的条目列表即视为证据），Verifier 不特殊认识任何具体工具名。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -39,8 +40,8 @@ class VerificationResult:
 
     flags: List[str] = field(default_factory=list)
     grounded: bool = True
-    source: str = "rules"           # rules / rules+llm / skip
-    disclaimer: str = ""            # LLM 判定未通过时的用户可见免责声明
+    source: str = "rules"  # rules / rules+llm / skip
+    disclaimer: str = ""  # LLM 判定未通过时的用户可见免责声明
 
     def summary(self) -> Dict[str, Any]:
         return {"flags": list(self.flags), "grounded": self.grounded, "source": self.source}
@@ -51,8 +52,9 @@ class ResponseVerifier:
 
     LLM_DISCLAIMER = "（部分内容未经工具证据完全支撑，请以官方渠道最新信息为准。）"
 
-    def __init__(self, client: Optional[Any] = None, model: str = "", llm_enabled: bool = False,
-                 gateway: Optional[Any] = None):
+    def __init__(
+        self, client: Optional[Any] = None, model: str = "", llm_enabled: bool = False, gateway: Optional[Any] = None
+    ):
         self._client = client
         self._model = model
         self._llm_enabled = llm_enabled
@@ -80,21 +82,25 @@ class ResponseVerifier:
             flags.append("expected_retrieval_missing")
         # Task Contract 的完成条件由 Harness 确定性校验；出口 Verifier 只汇总
         # 该事实，不再让 LLM 重新猜一次任务是否完成。
-        if any(not bool((item.get("contract_verification") or {}).get("passed", True)) for item in (task_contracts or [])):
+        if any(
+            not bool((item.get("contract_verification") or {}).get("passed", True)) for item in (task_contracts or [])
+        ):
             flags.append("task_contract_failed")
         return flags
 
     # ── LLM 校验（可选，fail-open）───────────────────────────────────────────
 
     async def _llm_grounded(
-        self, req: Any, content: str, tool_evidence: List[Dict[str, Any]],
+        self,
+        req: Any,
+        content: str,
+        tool_evidence: List[Dict[str, Any]],
     ) -> Optional[bool]:
         """判定回答是否被工具证据支撑：True/False，None = 校验不可用（放行）。"""
         if self._client is None or not self._model:
             return None
         evidence = "\n".join(
-            f"- {item.get('title', '')!s}: {str(item.get('content', ''))[:400]}"
-            for item in (tool_evidence or [])
+            f"- {item.get('title', '')!s}: {str(item.get('content', ''))[:400]}" for item in (tool_evidence or [])
         )[:3000]
         system = (
             "你是 EchoGuide 的出口校验器。判断助手回答中的事实性陈述是否被工具证据支撑："
@@ -102,10 +108,7 @@ class ResponseVerifier:
             "通用建议、流程指引或基于证据的合理推论可以通过。只输出 JSON："
             '{"grounded": true/false, "reason": "一句话原因"}'
         )
-        user = (
-            f"用户请求: {req.message}\n\n工具证据:\n{evidence or '（无）'}\n\n"
-            f"助手回答:\n{content[:2000]}"
-        )
+        user = f"用户请求: {req.message}\n\n工具证据:\n{evidence or '（无）'}\n\n助手回答:\n{content[:2000]}"
         try:
             if self._gateway is not None:
                 result = await self._gateway.call(
@@ -125,9 +128,7 @@ class ResponseVerifier:
                     system=system,
                     messages=[{"role": "user", "content": user}],
                 )
-            text = "".join(
-                b.text for b in resp.content if getattr(b, "type", "") == "text"
-            ).strip().strip("`")
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip().strip("`")
             if text.startswith("json"):
                 text = text[4:]
             data = json.loads(text)
@@ -154,21 +155,25 @@ class ResponseVerifier:
             return VerificationResult(source="skip")
 
         flags = self._rule_flags(
-            content, tools_used, tool_evidence, write_tools, needs_knowledge, task_contracts,
+            content,
+            tools_used,
+            tool_evidence,
+            write_tools,
+            needs_knowledge,
+            task_contracts,
         )
         source = "rules"
 
-        use_llm = (
-            self._llm_enabled
-            and (profile == "deep" or req.action == IntentAction.REQUEST)
-        )
+        use_llm = self._llm_enabled and (profile == "deep" or req.action == IntentAction.REQUEST)
         if use_llm:
             source = "rules+llm"
             grounded = await self._llm_grounded(req, content, tool_evidence)
             if grounded is False:
                 flags.append("llm_ungrounded")
                 return VerificationResult(
-                    flags=flags, grounded=False, source=source,
+                    flags=flags,
+                    grounded=False,
+                    source=source,
                     disclaimer=self.LLM_DISCLAIMER,
                 )
         return VerificationResult(flags=flags, grounded=not flags, source=source)

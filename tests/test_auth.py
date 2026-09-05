@@ -1,4 +1,5 @@
 """Lightweight authentication and authorization tests."""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -42,7 +43,10 @@ def test_user_creation_authentication_and_password_change(tmp_path):
     assert store.authenticate("student01", "abcdef") is None
     # 改密后 authenticate 返回的是 pwd_ver=1 的新版本用户（不是创建时的 pwd_ver=0）
     assert store.authenticate("student01", "new-password") == auth_service.AuthUser(
-        user.id, user.username, user.role, pwd_ver=1,
+        user.id,
+        user.username,
+        user.role,
+        pwd_ver=1,
     )
 
 
@@ -85,14 +89,17 @@ def test_old_token_without_pwd_ver_still_valid_when_unchanged(tmp_path, monkeypa
     import json
     import time as time_mod
 
-    payload = {"sub": user.id, "username": user.username, "role": user.role,
-               "exp": int(time_mod.time()) + 3600}
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).decode("ascii").rstrip("=")
-    signature = base64.urlsafe_b64encode(hmac.new(
-        b"test-secret", encoded.encode("ascii"), hashlib.sha256
-    ).digest()).decode("ascii").rstrip("=")
+    payload = {"sub": user.id, "username": user.username, "role": user.role, "exp": int(time_mod.time()) + 3600}
+    encoded = (
+        base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+        .decode("ascii")
+        .rstrip("=")
+    )
+    signature = (
+        base64.urlsafe_b64encode(hmac.new(b"test-secret", encoded.encode("ascii"), hashlib.sha256).digest())
+        .decode("ascii")
+        .rstrip("=")
+    )
     legacy_token = f"{encoded}.{signature}"
     assert decode_session_token(legacy_token) == user
 

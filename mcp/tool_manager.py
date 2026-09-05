@@ -16,6 +16,7 @@
 与 Agentic RAG 主链路（Agent 调用 knowledge_search）共用的同一套链路：
 注册工具时设置 use_rewrite=True，call() 即自动走完整优化链路。
 """
+
 import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
@@ -33,32 +34,34 @@ logger = logging.getLogger(__name__)
 
 # ── 数据结构 ──────────────────────────────────────────────────────────────────
 
+
 class CircuitState(Enum):
-    CLOSED    = "closed"     # 正常
-    OPEN      = "open"       # 熔断，拒绝请求
+    CLOSED = "closed"  # 正常
+    OPEN = "open"  # 熔断，拒绝请求
     HALF_OPEN = "half_open"  # 探测恢复
 
 
 @dataclass
 class ToolResult:
-    success:        bool
-    data:           Any
-    tool_name:      str
-    error:          Optional[str] = None
-    cached:         bool = False
-    latency_ms:     float = 0.0
-    reranked:       bool = False   # 是否经过重排
-    fallback_used:  bool = False   # 是否由工具 fallback 产生（成功也应可观测）
+    success: bool
+    data: Any
+    tool_name: str
+    error: Optional[str] = None
+    cached: bool = False
+    latency_ms: float = 0.0
+    reranked: bool = False  # 是否经过重排
+    fallback_used: bool = False  # 是否由工具 fallback 产生（成功也应可观测）
 
 
 @dataclass
 class ToolStats:
     """工具运行时统计，供 Monitor 读取。"""
-    total:              int = 0
-    success:            int = 0
-    failed:             int = 0
-    total_latency_ms:   float = 0.0
-    consecutive_fails:  int = 0
+
+    total: int = 0
+    success: int = 0
+    failed: int = 0
+    total_latency_ms: float = 0.0
+    consecutive_fails: int = 0
 
     @property
     def success_rate(self) -> float:
@@ -71,6 +74,7 @@ class ToolStats:
 
 # ── 熔断器 ────────────────────────────────────────────────────────────────────
 
+
 class CircuitBreaker:
     """
     三态熔断器：CLOSED → OPEN → HALF_OPEN → CLOSED
@@ -81,11 +85,11 @@ class CircuitBreaker:
     """
 
     def __init__(self, failure_threshold: int = 5, recovery_s: float = 60.0):
-        self.threshold   = failure_threshold
-        self.recovery_s  = recovery_s
-        self.state       = CircuitState.CLOSED
-        self.fail_count  = 0
-        self.opened_at:  Optional[float] = None
+        self.threshold = failure_threshold
+        self.recovery_s = recovery_s
+        self.state = CircuitState.CLOSED
+        self.fail_count = 0
+        self.opened_at: Optional[float] = None
 
     def allow(self) -> bool:
         if self.state == CircuitState.CLOSED:
@@ -104,12 +108,13 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         self.fail_count += 1
         if self.fail_count >= self.threshold:
-            self.state     = CircuitState.OPEN
+            self.state = CircuitState.OPEN
             self.opened_at = time.monotonic()
             logger.warning(f"熔断器打开（连续失败 {self.fail_count} 次）")
 
 
 # ── 工具定义 ──────────────────────────────────────────────────────────────────
+
 
 class ToolEffect(Enum):
     """工具副作用声明（fail-closed）：未声明 = 不暴露、不可写。
@@ -118,30 +123,31 @@ class ToolEffect(Enum):
     - WRITE: 修改系统内部状态（如待办数据）；
     - EXTERNAL_SIDE_EFFECT: 对外部系统产生副作用（如发送通知、调用外部写接口）。
     """
-    READ                 = "read"
-    WRITE                = "write"
+
+    READ = "read"
+    WRITE = "write"
     EXTERNAL_SIDE_EFFECT = "external_side_effect"
 
 
 @dataclass
 class Tool:
-    name:        str
+    name: str
     description: str
-    handler:     Callable                    # async (params, context) -> Any
-    schema:      Dict[str, Any]              # JSON Schema
-    cache_ttl:   float = 0.0                 # 0 = 不缓存
-    timeout_s:   float = 30.0
-    supports_rerank: bool = False            # 是否支持结果重排
-    use_rewrite: bool = False                # 调用时是否自动走「查询改写→并行召回→去重→重排」链路
-    fallback:    Optional[Callable] = None    # sync/async (params, context, error) -> Any
-    agent_exposed: bool = True               # 是否暴露给 Agent 的 function calling
+    handler: Callable  # async (params, context) -> Any
+    schema: Dict[str, Any]  # JSON Schema
+    cache_ttl: float = 0.0  # 0 = 不缓存
+    timeout_s: float = 30.0
+    supports_rerank: bool = False  # 是否支持结果重排
+    use_rewrite: bool = False  # 调用时是否自动走「查询改写→并行召回→去重→重排」链路
+    fallback: Optional[Callable] = None  # sync/async (params, context, error) -> Any
+    agent_exposed: bool = True  # 是否暴露给 Agent 的 function calling
     # 副作用声明（fail-closed）：None = 未声明 → 不暴露给 Agent、不可写。
     # 新增工具必须显式声明 effect；忘记声明时只影响它自己（不可见不可写），
     # 不会被只读动作误当只读工具开放。
-    effect:      Optional[ToolEffect] = None
+    effect: Optional[ToolEffect] = None
 
     # 运行时状态（不参与构造）
-    stats:   ToolStats    = field(default_factory=ToolStats, init=False)
+    stats: ToolStats = field(default_factory=ToolStats, init=False)
     breaker: CircuitBreaker = field(default_factory=CircuitBreaker, init=False)
 
     @property
@@ -160,6 +166,7 @@ class Tool:
 
 
 # ── MCP 工具管理器 ────────────────────────────────────────────────────────────
+
 
 class MCPToolManager:
     """
@@ -181,17 +188,15 @@ class MCPToolManager:
         if base_url:
             kwargs["base_url"] = base_url
         self._client = AsyncAnthropic(**kwargs)
-        self._model  = model
+        self._model = model
         self._gateway = gateway
         # 重排后端（构造参数优先，否则读环境变量）：
         #   local（默认）= 本地 bge-reranker 毫秒级打分，不可用自动降级 LLM；
         #   llm = LLM 打分（旧行为，秒级延迟 + token 成本）；
         #   off = 关闭重排，按原顺序截断 Top-K。
-        self._rerank_backend = (
-            rerank_backend or os.getenv("ECHOGUIDE_RERANK_BACKEND", "local")
-        ).strip().lower()
+        self._rerank_backend = (rerank_backend or os.getenv("ECHOGUIDE_RERANK_BACKEND", "local")).strip().lower()
         self._tools: Dict[str, Tool] = {}
-        self._cache: Dict[str, tuple] = {}   # key → (result, expire_at)
+        self._cache: Dict[str, tuple] = {}  # key → (result, expire_at)
 
     # ── 注册 / 注销 ───────────────────────────────────────────────────────────
 
@@ -220,7 +225,7 @@ class MCPToolManager:
         context: Optional[Dict[str, Any]] = None,
         *,
         use_cache: bool = True,
-        rerank_top_k: int = 0,          # >0 时对结果重排，取 Top-K
+        rerank_top_k: int = 0,  # >0 时对结果重排，取 Top-K
         use_rewrite: Optional[bool] = None,  # None=按工具配置，False=绕过，True=强制走改写链路
     ) -> ToolResult:
         """
@@ -245,15 +250,25 @@ class MCPToolManager:
         # /search 等）都自动走完整优化链路；子查询的参数（min_score/domain 等）原样透传，
         # 保证领域过滤、相关性阈值等语义在改写链路中不丢失。
         if tool.use_rewrite and use_rewrite is not False:
-            return await self.search_with_rewrite(
-                name,
-                params.get("query", ""),
-                top_k=params.get("top_k", 5),
-                context=context,
-                extra_params={
-                    k: v for k, v in params.items() if k not in ("query", "top_k")
-                },
-            )
+            # 改写链路整体受 tool.timeout_s 约束：内部 rewrite + 并行子检索 + rerank
+            # 各自超时相加最坏 45s+，没有统一 deadline 时调用方会无限等待
+            try:
+                return await asyncio.wait_for(
+                    self.search_with_rewrite(
+                        name,
+                        params.get("query", ""),
+                        top_k=params.get("top_k", 5),
+                        context=context,
+                        extra_params={k: v for k, v in params.items() if k not in ("query", "top_k")},
+                    ),
+                    timeout=tool.timeout_s,
+                )
+            except TimeoutError:
+                tool.stats.failed += 1
+                tool.stats.consecutive_fails += 1
+                tool.breaker.record_failure()
+                logger.error(f"改写检索链路超时: {name} ({tool.timeout_s}s)")
+                return await self._fallback_result(tool, params, context, "执行超时")
 
         # 缓存命中
         if use_cache and tool.cache_ttl > 0:
@@ -287,8 +302,7 @@ class MCPToolManager:
                 query = params.get("query", "")
                 data, reranked = await self._rerank(query, data, rerank_top_k), True
 
-            return ToolResult(success=True, data=data, tool_name=name,
-                              latency_ms=latency, reranked=reranked)
+            return ToolResult(success=True, data=data, tool_name=name, latency_ms=latency, reranked=reranked)
 
         except TimeoutError:
             tool.stats.failed += 1
@@ -348,6 +362,7 @@ class MCPToolManager:
 返回 JSON 数组，例如: ["子查询1", "子查询2", "子查询3"]"""
         prompt = self._clean_text(prompt)
         try:
+
             async def _one():
                 if self._gateway is not None:
                     result = await self._gateway.call(
@@ -355,15 +370,19 @@ class MCPToolManager:
                         model=self._model,
                         messages=[{"role": "user", "content": prompt}],
                         span_name="rewrite_query",
-                        max_tokens=256, temperature=0.3,
+                        max_tokens=256,
+                        temperature=0.3,
                         thinking={"type": "disabled"},
                     )
                     return result.response
                 return await self._client.messages.create(
-                    model=self._model, max_tokens=256, temperature=0.3,
+                    model=self._model,
+                    max_tokens=256,
+                    temperature=0.3,
                     thinking={"type": "disabled"},
                     messages=[{"role": "user", "content": prompt}],
                 )
+
             resp = await asyncio.wait_for(_one(), timeout=15.0)
             raw = resp.content[0].text
             s, e = raw.find("["), raw.rfind("]") + 1
@@ -410,24 +429,26 @@ class MCPToolManager:
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 3. 合并去重（按内容哈希去重）；剔除降级占位条目 —— fallback 数据不是
+        # 3. 合并去重；剔除降级占位条目 —— fallback 数据不是
         # 真实检索结果，混入合并池会被 LLM 重排成"证据"误导 Agent 引用。
+        # 去重键用 chunk 身份（title+chunk_index）：同一 chunk 被不同子查询召回时
+        # score 不同，按整条 dict 哈希会把所有真实重复放走。
         seen, merged = set(), []
         for r in results:
             if isinstance(r, ToolResult) and r.success and isinstance(r.data, list):
                 for item in r.data:
                     if isinstance(item, dict) and item.get("fallback"):
                         continue
-                    key = hashlib.md5(str(item).encode()).hexdigest()
+                    if item.get("chunk") is not None:
+                        key = (item.get("title"), item.get("chunk"))
+                    else:  # 非知识库条目：退回内容哈希（剔除 score 差异）
+                        key = hashlib.md5(str({k: v for k, v in item.items() if k != "score"}).encode()).hexdigest()
                     if key not in seen:
                         seen.add(key)
                         merged.append(item)
 
         if not merged:
-            errors = "; ".join(
-                r.error for r in results
-                if isinstance(r, ToolResult) and r.error
-            )
+            errors = "; ".join(r.error for r in results if isinstance(r, ToolResult) and r.error)
             detail = "所有子查询均无结果"
             if errors:
                 detail = f"{detail}（{errors}）"
@@ -491,8 +512,7 @@ class MCPToolManager:
             return items
 
         # 将结果序列化为文本供 LLM 评分
-        items_text = "\n".join(f"{i}. {json.dumps(item, ensure_ascii=False)[:200]}"
-                               for i, item in enumerate(items))
+        items_text = "\n".join(f"{i}. {json.dumps(item, ensure_ascii=False)[:200]}" for i, item in enumerate(items))
         prompt = f"""根据用户查询，对以下检索结果按相关性打分（0-10），返回 JSON 数组。
 用户查询: "{query}"
 检索结果:
@@ -503,6 +523,7 @@ class MCPToolManager:
         prompt = self._clean_text(prompt)
 
         try:
+
             async def _one():
                 if self._gateway is not None:
                     result = await self._gateway.call(
@@ -510,15 +531,19 @@ class MCPToolManager:
                         model=self._model,
                         messages=[{"role": "user", "content": prompt}],
                         span_name="rerank_llm",
-                        max_tokens=256, temperature=0.0,
+                        max_tokens=256,
+                        temperature=0.0,
                         thinking={"type": "disabled"},
                     )
                     return result.response
                 return await self._client.messages.create(
-                    model=self._model, max_tokens=256, temperature=0.0,
+                    model=self._model,
+                    max_tokens=256,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                     messages=[{"role": "user", "content": prompt}],
                 )
+
             resp = await asyncio.wait_for(_one(), timeout=15.0)
             raw = resp.content[0].text
             s, e = raw.find("["), raw.rfind("]") + 1

@@ -89,6 +89,14 @@ prepare_env() {
         warn "提示: 支持 Claude 或 DeepSeek（DeepSeek 需同时设置 ANTHROPIC_BASE_URL）"
         exit 1
     fi
+    # 会话密钥占位符检查：生产环境运行时 auth 会拒绝启动，提前到部署前拦截
+    if grep -qE "^(JWT_SECRET_KEY|SECRET_KEY)=change_this_in_production" "$ENV_FILE" 2>/dev/null; then
+        if grep -qE "^(ECHOGUIDE_ENV|APP_ENV)=production" "$ENV_FILE" 2>/dev/null; then
+            error ".env 中的 JWT_SECRET_KEY/SECRET_KEY 仍是占位符，生产环境服务将拒绝启动。请先设置真实密钥。"
+            exit 1
+        fi
+        warn "JWT_SECRET_KEY/SECRET_KEY 仍为占位符；本地/演示可用，生产部署前必须替换。"
+    fi
     info ".env 配置已就绪（检测到已配置 API Key）"
 }
 

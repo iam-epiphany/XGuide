@@ -1,4 +1,5 @@
 """可观测性路由：/monitor、/metrics、/traces 与评测入口 /eval/run。"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -53,8 +54,10 @@ async def trace_detail(trace_id: str, _admin=Depends(require_observability)):
 
 # ── 评测 ──────────────────────────────────────────────────────────────────────
 
+
 class EvalIntentInput(BaseModel):
     """意图识别评测用例。"""
+
     message: str = Field(min_length=1, max_length=2000)
     expected_intent: str = Field(min_length=1, max_length=80)
     context: Optional[Dict[str, Any]] = None
@@ -62,6 +65,7 @@ class EvalIntentInput(BaseModel):
 
 class EvalDialogInput(BaseModel):
     """对话质量评测用例。question 单轮，turns 多轮；可选 golden_answer（Answer Correctness）。"""
+
     question: Optional[str] = Field(default=None, min_length=1, max_length=2000)
     turns: Optional[List[str]] = Field(default=None, min_length=1, max_length=12)
     user_id: Optional[str] = Field(default=None, max_length=64)
@@ -77,12 +81,14 @@ class EvalDialogInput(BaseModel):
 
 class RetrievalCaseInput(BaseModel):
     """RAG 检索硬指标评测用例。"""
+
     query: str = Field(min_length=1, max_length=500)
     relevant_titles: List[str] = Field(min_length=1, max_length=20)
 
 
 class EvalRunInput(BaseModel):
     """评测请求。为空时使用内置默认用例。"""
+
     intent_cases: Optional[List[EvalIntentInput]] = None
     dialog_cases: Optional[List[EvalDialogInput]] = None
     routing_cases: Optional[List[Dict[str, Any]]] = None
@@ -117,10 +123,7 @@ async def run_eval(body: Optional[EvalRunInput] = None, _admin=Depends(require_a
         intent_cases = DEFAULT_INTENT_CASES
 
     if body and body.dialog_cases is not None:
-        dialog_cases = [
-            c.model_dump(exclude_none=True)
-            for c in body.dialog_cases
-        ]
+        dialog_cases = [c.model_dump(exclude_none=True) for c in body.dialog_cases]
     else:
         dialog_cases = DEFAULT_DIALOG_CASES
 
@@ -128,8 +131,7 @@ async def run_eval(body: Optional[EvalRunInput] = None, _admin=Depends(require_a
 
     if body and body.retrieval_cases is not None:
         retrieval_cases = [
-            RetrievalTestCase(query=c.query, relevant_titles=c.relevant_titles)
-            for c in body.retrieval_cases
+            RetrievalTestCase(query=c.query, relevant_titles=c.relevant_titles) for c in body.retrieval_cases
         ]
     else:
         retrieval_cases = DEFAULT_RETRIEVAL_CASES
@@ -152,15 +154,15 @@ async def run_eval(body: Optional[EvalRunInput] = None, _admin=Depends(require_a
         dataset="custom_cases" if custom_cases else "built_in_cases_v1",
     )
     return {
-        "pass_rate":       report.pass_rate,
-        "total":           report.total,
-        "passed":          report.passed,
-        "avg_scores":      report.avg_scores,
-        "regressions":     report.regressions,
+        "pass_rate": report.pass_rate,
+        "total": report.total,
+        "passed": report.passed,
+        "avg_scores": report.avg_scores,
+        "regressions": report.regressions,
         "recommendations": report.recommendations,
-        "retrieval":       report.retrieval,
-        "provenance":      report.provenance,
-        "judge":           report.judge,
+        "retrieval": report.retrieval,
+        "provenance": report.provenance,
+        "judge": report.judge,
         "results": [
             {
                 "test_id": r.test_id,

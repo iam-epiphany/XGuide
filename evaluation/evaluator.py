@@ -13,6 +13,7 @@
 LLM-as-Judge 是评测 Agent 质量的关键技术：
   人工标注成本高、主观性强；用 LLM 评判可以规模化、可重复。
 """
+
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -38,20 +39,22 @@ _LOG_RESPONSE_MAX = 800
 
 # ── 数据结构 ──────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class IntentTestCase:
-    message:          str
-    expected_intent:  str
-    context:          Optional[Dict[str, Any]] = None
+    message: str
+    expected_intent: str
+    context: Optional[Dict[str, Any]] = None
 
 
 @dataclass
 class QualityScores:
     """LLM-as-Judge 评分结果。"""
-    relevance:    float   # 相关性：回答是否针对问题
-    accuracy:     float   # 准确性：信息是否正确
-    completeness: float   # 完整性：是否完整解决问题
-    helpfulness:  float   # 有用性：用户是否能据此行动
+
+    relevance: float  # 相关性：回答是否针对问题
+    accuracy: float  # 准确性：信息是否正确
+    completeness: float  # 完整性：是否完整解决问题
+    helpfulness: float  # 有用性：用户是否能据此行动
     judge_failed: bool = False
     error: Optional[str] = None
 
@@ -62,31 +65,33 @@ class QualityScores:
 
 @dataclass
 class EvalResult:
-    test_id:    str
-    passed:     bool
-    scores:     Dict[str, float]
-    detail:     str = ""
-    metadata:   Dict[str, Any] = field(default_factory=dict)
+    test_id: str
+    passed: bool
+    scores: Dict[str, float]
+    detail: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
     failure_stage: str = ""  # intent/planning/routing/retrieval/tool/generation/grounding/verification/unknown
 
 
 @dataclass
 class EvalReport:
     """评测报告。"""
-    timestamp:        str
-    total:            int
-    passed:           int
-    pass_rate:        float
-    avg_scores:       Dict[str, float]
-    regressions:      List[str]          # 相比基线退化的指标
-    recommendations:  List[str]
-    results:          List[EvalResult]
-    retrieval:        Optional[Dict[str, Any]] = None  # RAG 检索硬指标（HitRate@K/Recall@K/MRR）
-    provenance:       Dict[str, Any] = field(default_factory=dict)
-    judge:             Dict[str, Any] = field(default_factory=dict)
+
+    timestamp: str
+    total: int
+    passed: int
+    pass_rate: float
+    avg_scores: Dict[str, float]
+    regressions: List[str]  # 相比基线退化的指标
+    recommendations: List[str]
+    results: List[EvalResult]
+    retrieval: Optional[Dict[str, Any]] = None  # RAG 检索硬指标（HitRate@K/Recall@K/MRR）
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    judge: Dict[str, Any] = field(default_factory=dict)
 
 
 # ── LLM-as-Judge ─────────────────────────────────────────────────────────────
+
 
 class LLMJudge:
     """
@@ -116,7 +121,7 @@ Agent 响应: {response}
 
     def __init__(self, client: AsyncAnthropic, model: str):
         self._client = client
-        self._model  = model
+        self._model = model
 
     async def judge(
         self,
@@ -135,7 +140,9 @@ Agent 响应: {response}
         for attempt in range(2):
             try:
                 resp = await self._client.messages.create(
-                    model=self._model, max_tokens=256, temperature=0.0,
+                    model=self._model,
+                    max_tokens=256,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -146,18 +153,19 @@ Agent 响应: {response}
                 return QualityScores(**data)
             except Exception as ex:
                 logger.warning(
-                    f"LLM Judge 第 {attempt + 1} 次失败: {ex} "
-                    f"(question={str(question)[:_LOG_QUESTION_MAX]!r})"
+                    f"LLM Judge 第 {attempt + 1} 次失败: {ex} (question={str(question)[:_LOG_QUESTION_MAX]!r})"
                 )
                 if attempt == 0:
                     # 重试时提示必须输出严格 JSON，减少格式漂移
                     prompt = (
-                        prompt
-                        + "\n\n注意：上次输出无法解析。请只输出一个 JSON 对象，"
+                        prompt + "\n\n注意：上次输出无法解析。请只输出一个 JSON 对象，"
                         "不要包含任何其他文字、注释或 Markdown 代码块。"
                     )
         return QualityScores(
-            0.5, 0.5, 0.5, 0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
             judge_failed=True,
             error="Judge 连续 2 次输出无法解析",
         )
@@ -180,7 +188,7 @@ Agent 响应: {response}
         if s == -1 or e <= s:
             return None
         try:
-            data = json.loads(text[s:e + 1])
+            data = json.loads(text[s : e + 1])
         except json.JSONDecodeError:
             return None
         if not isinstance(data, dict):
@@ -240,20 +248,19 @@ Agent 回答: {response}
 
     async def judge_faithfulness(self, question: str, response: str, context: str) -> tuple[float, bool]:
         """回答忠实性：回答是否被检索上下文支持（无幻觉）。失败兜底 0.5 并标记。"""
-        prompt = self.FAITHFULNESS_PROMPT.format(
-            question=question, context=context[:3000], response=response
-        )
+        prompt = self.FAITHFULNESS_PROMPT.format(question=question, context=context[:3000], response=response)
         return await self._judge_scalar(prompt, "faithfulness", question=question)
 
     async def judge_answer_correctness(self, question: str, response: str, golden: str) -> tuple[float, bool]:
         """答案正确性：与标准答案的一致性（需要用例提供 golden_answer）。"""
-        prompt = self.ANSWER_CORRECTNESS_PROMPT.format(
-            question=question, golden=golden[:2000], response=response
-        )
+        prompt = self.ANSWER_CORRECTNESS_PROMPT.format(question=question, golden=golden[:2000], response=response)
         return await self._judge_scalar(prompt, "correctness", question=question)
 
     async def _judge_scalar(
-        self, prompt: str, key: str, question: str = "",
+        self,
+        prompt: str,
+        key: str,
+        question: str = "",
     ) -> tuple[float, bool]:
         """单指标 Judge：输出 {"key": 0.0-1.0}。返回 (分数, 是否失败)。
 
@@ -264,7 +271,9 @@ Agent 回答: {response}
         for attempt in range(2):
             try:
                 resp = await self._client.messages.create(
-                    model=self._model, max_tokens=128, temperature=0.0,
+                    model=self._model,
+                    max_tokens=128,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -275,8 +284,7 @@ Agent 回答: {response}
                 return max(0.0, min(1.0, float(data[key]))), False
             except Exception as ex:
                 logger.warning(
-                    f"Judge({key}) 第 {attempt + 1} 次失败: {ex} "
-                    f"(question={str(question)[:_LOG_QUESTION_MAX]!r})"
+                    f"Judge({key}) 第 {attempt + 1} 次失败: {ex} (question={str(question)[:_LOG_QUESTION_MAX]!r})"
                 )
                 if attempt == 0:
                     prompt = prompt + "\n\n注意：上次输出无法解析。请只输出一个 JSON 对象。"
@@ -295,13 +303,14 @@ Agent 回答: {response}
         if s == -1 or e <= s:
             return None
         try:
-            data = json.loads(text[s:e + 1])
+            data = json.loads(text[s : e + 1])
         except json.JSONDecodeError:
             return None
         return data if isinstance(data, dict) else None
 
 
 # ── 意图识别评测 ──────────────────────────────────────────────────────────────
+
 
 class IntentEvaluator:
     """
@@ -337,15 +346,17 @@ class IntentEvaluator:
 
             predictions.append(predicted)
             ground_truth.append(expected)
-            case_details.append({
-                "message": case.message,
-                "expected": expected,
-                "predicted": predicted,
-                "domain": result.domain.value,
-                "action": result.action.value,
-                "confidence": result.confidence,
-                "reasoning": result.reasoning,
-            })
+            case_details.append(
+                {
+                    "message": case.message,
+                    "expected": expected,
+                    "predicted": predicted,
+                    "domain": result.domain.value,
+                    "action": result.action.value,
+                    "confidence": result.confidence,
+                    "reasoning": result.reasoning,
+                }
+            )
 
         # 纯 Python 计算指标
         correct = sum(p == g for p, g in zip(predictions, ground_truth, strict=False))
@@ -359,28 +370,30 @@ class IntentEvaluator:
             fp = sum(p == label and g != label for p, g in zip(predictions, ground_truth, strict=False))
             fn = sum(p != label and g == label for p, g in zip(predictions, ground_truth, strict=False))
             prec = tp / (tp + fp) if (tp + fp) else 0.0
-            rec  = tp / (tp + fn) if (tp + fn) else 0.0
-            f1   = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+            rec = tp / (tp + fn) if (tp + fn) else 0.0
+            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
             per_class[label] = {"precision": prec, "recall": rec, "f1": f1}
 
         macro_f1 = statistics.mean(v["f1"] for v in per_class.values()) if per_class else 0.0
 
         return {
-            "accuracy":   round(accuracy, 4),
-            "macro_f1":   round(macro_f1, 4),
-            "per_class":  per_class,
-            "total":      len(cases),
-            "correct":    correct,
-            "cases":      case_details,
+            "accuracy": round(accuracy, 4),
+            "macro_f1": round(macro_f1, 4),
+            "per_class": per_class,
+            "total": len(cases),
+            "correct": correct,
+            "cases": case_details,
         }
 
 
 # ── RAG 检索硬指标（无 LLM，确定性）──────────────────────────────────────────
 
+
 @dataclass
 class RetrievalTestCase:
     """检索评测用例：query + 知识库中相关文档的标题。"""
-    query:           str
+
+    query: str
     relevant_titles: List[str]
 
 
@@ -419,21 +432,23 @@ def compute_retrieval_metrics(
         hits.append(hit)
         recalls.append(recall)
         mrrs.append(mrr)
-        cases.append({
-            "relevant": sorted(rel_set),
-            "top_titles": top_titles,
-            "hit": hit,
-            "recall": round(recall, 4),
-            "mrr": round(mrr, 4),
-        })
+        cases.append(
+            {
+                "relevant": sorted(rel_set),
+                "top_titles": top_titles,
+                "hit": hit,
+                "recall": round(recall, 4),
+                "mrr": round(mrr, 4),
+            }
+        )
 
     return {
         "hit_rate@K": round(sum(hits) / len(hits), 4) if hits else 0.0,
-        "recall@K":   round(statistics.mean(recalls), 4) if recalls else 0.0,
-        "mrr":        round(statistics.mean(mrrs), 4) if mrrs else 0.0,
-        "top_k":      top_k,
-        "total":      len(results),
-        "cases":      cases,
+        "recall@K": round(statistics.mean(recalls), 4) if recalls else 0.0,
+        "mrr": round(statistics.mean(mrrs), 4) if mrrs else 0.0,
+        "top_k": top_k,
+        "total": len(results),
+        "cases": cases,
     }
 
 
@@ -479,6 +494,7 @@ class RetrievalEvaluator:
 
 # ── 端到端评测器 ──────────────────────────────────────────────────────────────
 
+
 class EndToEndEvaluator:
     """
     端到端 Agent 评测。
@@ -497,12 +513,12 @@ class EndToEndEvaluator:
         self,
         orchestrator,
         recognizer: IntentRecognizer,
-        api_key:  str,
+        api_key: str,
         base_url: Optional[str] = None,
-        model:    str = "claude-3-5-sonnet-20241022",
-        judge_api_key:  Optional[str] = None,
+        model: str = "claude-3-5-sonnet-20241022",
+        judge_api_key: Optional[str] = None,
         judge_base_url: Optional[str] = None,
-        judge_model:    Optional[str] = None,
+        judge_model: Optional[str] = None,
         baseline_path: Optional[str] = None,
         knowledge_base: Optional[Any] = None,
     ):
@@ -524,10 +540,10 @@ class EndToEndEvaluator:
             judge_kwargs["base_url"] = judge_base_url
         judge_client = AsyncAnthropic(**judge_kwargs)
 
-        self._orchestrator     = orchestrator
-        self._model            = model
-        self._judge            = LLMJudge(judge_client, judge_model or model)
-        self._judge_model      = judge_model or model
+        self._orchestrator = orchestrator
+        self._model = model
+        self._judge = LLMJudge(judge_client, judge_model or model)
+        self._judge_model = judge_model or model
         # 独立 Judge：只有显式配置了不同的 API Key / 端点 / 模型才算独立
         self._judge_independent = (
             bool(judge_api_key and judge_api_key != api_key)
@@ -536,15 +552,15 @@ class EndToEndEvaluator:
         )
         self._intent_evaluator = IntentEvaluator(recognizer)
         self._retrieval_evaluator = RetrievalEvaluator(knowledge_base) if knowledge_base else None
-        self._history:         List[EvalReport] = []
+        self._history: List[EvalReport] = []
         self._baseline_path = pathlib.Path(baseline_path) if baseline_path else None
         self._baseline: Optional[EvalReport] = self._load_baseline()
 
     async def run(
         self,
-        intent_cases:    Optional[List[IntentTestCase]] = None,
-        dialog_cases:    Optional[List[Dict[str, Any]]] = None,
-        routing_cases:   Optional[List[Dict[str, Any]]] = None,
+        intent_cases: Optional[List[IntentTestCase]] = None,
+        dialog_cases: Optional[List[Dict[str, Any]]] = None,
+        routing_cases: Optional[List[Dict[str, Any]]] = None,
         retrieval_cases: Optional[List[RetrievalTestCase]] = None,
         promote_baseline: bool = False,
         dataset: str = "built_in_cases_v1",
@@ -564,8 +580,13 @@ class EndToEndEvaluator:
         """
         results: List[EvalResult] = []
         all_scores: Dict[str, List[float]] = {
-            "relevance": [], "accuracy": [], "completeness": [], "helpfulness": [],
-            "faithfulness": [], "answer_correctness": [], "citation_correctness": [],
+            "relevance": [],
+            "accuracy": [],
+            "completeness": [],
+            "helpfulness": [],
+            "faithfulness": [],
+            "answer_correctness": [],
+            "citation_correctness": [],
         }
 
         # 1. 意图识别评测
@@ -573,18 +594,20 @@ class EndToEndEvaluator:
         if intent_cases:
             intent_metrics = await self._intent_evaluator.evaluate(intent_cases)
             passed = intent_metrics["accuracy"] >= self.PASS_THRESHOLD
-            results.append(EvalResult(
-                test_id="intent_recognition",
-                passed=passed,
-                scores={"accuracy": intent_metrics["accuracy"], "macro_f1": intent_metrics["macro_f1"]},
-                detail=f"准确率 {intent_metrics['accuracy']:.1%}，Macro-F1 {intent_metrics['macro_f1']:.3f}",
-                metadata={
-                    "total": intent_metrics.get("total", 0),
-                    "correct": intent_metrics.get("correct", 0),
-                    "cases": intent_metrics.get("cases", []),
-                },
-                failure_stage="" if passed else "intent",
-            ))
+            results.append(
+                EvalResult(
+                    test_id="intent_recognition",
+                    passed=passed,
+                    scores={"accuracy": intent_metrics["accuracy"], "macro_f1": intent_metrics["macro_f1"]},
+                    detail=f"准确率 {intent_metrics['accuracy']:.1%}，Macro-F1 {intent_metrics['macro_f1']:.3f}",
+                    metadata={
+                        "total": intent_metrics.get("total", 0),
+                        "correct": intent_metrics.get("correct", 0),
+                        "cases": intent_metrics.get("cases", []),
+                    },
+                    failure_stage="" if passed else "intent",
+                )
+            )
 
         # 2. 对话质量评测（调用 orchestrator 产出回复，再用独立 Judge 模型评分）
         if dialog_cases:
@@ -608,34 +631,34 @@ class EndToEndEvaluator:
         retrieval_metrics: Optional[Dict[str, Any]] = None
         if retrieval_cases and self._retrieval_evaluator is not None:
             retrieval_metrics = await self._retrieval_evaluator.run(retrieval_cases)
-            results.append(EvalResult(
-                test_id="rag_retrieval",
-                passed=retrieval_metrics["hit_rate@K"] >= 0.5,
-                scores={
-                    "hit_rate@K": retrieval_metrics["hit_rate@K"],
-                    "recall@K": retrieval_metrics["recall@K"],
-                    "mrr": retrieval_metrics["mrr"],
-                },
-                detail=(
-                    f"HitRate@{retrieval_metrics['top_k']} {retrieval_metrics['hit_rate@K']:.1%}，"
-                    f"Recall@{retrieval_metrics['top_k']} {retrieval_metrics['recall@K']:.3f}，"
-                    f"MRR {retrieval_metrics['mrr']:.3f}"
-                ),
-                metadata={"cases": retrieval_metrics["cases"]},
-            ))
+            results.append(
+                EvalResult(
+                    test_id="rag_retrieval",
+                    passed=retrieval_metrics["hit_rate@K"] >= 0.5,
+                    scores={
+                        "hit_rate@K": retrieval_metrics["hit_rate@K"],
+                        "recall@K": retrieval_metrics["recall@K"],
+                        "mrr": retrieval_metrics["mrr"],
+                    },
+                    detail=(
+                        f"HitRate@{retrieval_metrics['top_k']} {retrieval_metrics['hit_rate@K']:.1%}，"
+                        f"Recall@{retrieval_metrics['top_k']} {retrieval_metrics['recall@K']:.3f}，"
+                        f"MRR {retrieval_metrics['mrr']:.3f}"
+                    ),
+                    metadata={"cases": retrieval_metrics["cases"]},
+                )
+            )
             all_scores["hit_rate@K"] = [retrieval_metrics["hit_rate@K"]]
             all_scores["recall@K"] = [retrieval_metrics["recall@K"]]
             all_scores["mrr"] = [retrieval_metrics["mrr"]]
 
         # 5. 汇总
-        avg_scores = {
-            k: round(statistics.mean(v), 4) for k, v in all_scores.items() if v
-        }
+        avg_scores = {k: round(statistics.mean(v), 4) for k, v in all_scores.items() if v}
         if intent_metrics:
             avg_scores["intent_accuracy"] = intent_metrics["accuracy"]
 
         passed_count = sum(1 for r in results if r.passed)
-        pass_rate    = passed_count / len(results) if results else 0.0
+        pass_rate = passed_count / len(results) if results else 0.0
 
         # 6. 回归检测
         regressions = self._detect_regressions(avg_scores)
@@ -655,7 +678,12 @@ class EndToEndEvaluator:
             retrieval=retrieval_metrics,
             provenance={
                 "dataset": dataset,
-                "dataset_counts": {"intent": len(intent_cases or []), "routing": len(routing_cases or []), "retrieval": len(retrieval_cases or []), "dialog": len(dialog_cases or [])},
+                "dataset_counts": {
+                    "intent": len(intent_cases or []),
+                    "routing": len(routing_cases or []),
+                    "retrieval": len(retrieval_cases or []),
+                    "dialog": len(dialog_cases or []),
+                },
                 "code_commit": self._git_commit(),
                 "generator_model": self._model,
                 "judge_model": self._judge_model,
@@ -674,7 +702,10 @@ class EndToEndEvaluator:
     @staticmethod
     def _git_commit() -> str:
         try:
-            return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=2).stdout.strip() or "unknown"
+            return (
+                subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=2).stdout.strip()
+                or "unknown"
+            )
         except Exception:
             return "unknown"
 
@@ -742,11 +773,12 @@ class EndToEndEvaluator:
 
                 if sources:
                     sources_text = "\n".join(
-                        f"[{i + 1}] {s.get('title', '')}: {s.get('content', '')[:800]}"
-                        for i, s in enumerate(sources)
+                        f"[{i + 1}] {s.get('title', '')}: {s.get('content', '')[:800]}" for i, s in enumerate(sources)
                     )
                     faithfulness, faithfulness_failed = await self._judge.judge_faithfulness(
-                        question, actual_answer, sources_text,
+                        question,
+                        actual_answer,
+                        sources_text,
                     )
                     score_dict["faithfulness"] = faithfulness
                     metadata["faithfulness"] = faithfulness
@@ -755,7 +787,9 @@ class EndToEndEvaluator:
             # Answer Correctness：用例提供 golden_answer 时才评测
             if golden_answer:
                 correctness, correctness_failed = await self._judge.judge_answer_correctness(
-                    question, actual_answer, golden_answer,
+                    question,
+                    actual_answer,
+                    golden_answer,
                 )
                 score_dict["answer_correctness"] = correctness
                 metadata["answer_correctness"] = correctness
@@ -777,19 +811,18 @@ class EndToEndEvaluator:
             }
             if scores.judge_failed:
                 logger.warning(
-                        f"[Eval] Judge 失败 test_id={test_id} conv_id={conv_id} "
+                    f"[Eval] Judge 失败 test_id={test_id} conv_id={conv_id} "
                     f"request_id={metadata['request_id']} trace_id={metadata['trace_id']} failure_stage={failure_stage} "
                     f"question={str(question)[:_LOG_QUESTION_MAX]!r} error={scores.error}"
                 )
             else:
-                failed_flags = [
-                    k for k in ("faithfulness_failed", "answer_correctness_failed")
-                    if metadata.get(k)
-                ]
+                failed_flags = [k for k in ("faithfulness_failed", "answer_correctness_failed") if metadata.get(k)]
                 low = {
                     k: round(v, 3)
                     for k, v in score_dict.items()
-                    if k != "overall" and isinstance(v, float) and v < self.PASS_THRESHOLD
+                    if k != "overall"
+                    and isinstance(v, float)
+                    and v < self.PASS_THRESHOLD
                     and not metadata.get(failed_flag_of.get(k, ""), False)
                 }
                 if not passed or low or failed_flags:
@@ -805,14 +838,16 @@ class EndToEndEvaluator:
                         f"response={str(actual_answer or '')[:_LOG_RESPONSE_MAX]!r}"
                     )
 
-            results.append(EvalResult(
-                test_id=test_id,
-                passed=passed,
-                scores=score_dict,
-                detail=f"Q: {question[:30]}... → 综合评分 {scores.overall:.3f}",
-                metadata=metadata,
-                failure_stage=failure_stage,
-            ))
+            results.append(
+                EvalResult(
+                    test_id=test_id,
+                    passed=passed,
+                    scores=score_dict,
+                    detail=f"Q: {question[:30]}... → 综合评分 {scores.overall:.3f}",
+                    metadata=metadata,
+                    failure_stage=failure_stage,
+                )
+            )
 
         return results
 
@@ -858,29 +893,30 @@ class EndToEndEvaluator:
 
                 turn_ok = actual_domain == expected_agent
                 passed = passed and turn_ok
-                details.append({
-                    "turn": turn_idx,
-                    "question": question,
-                    "expected_agent": expected_agent,
-                    "actual_domain": actual_domain,
-                    "ok": turn_ok,
-                    "request_id": getattr(orch_result, "request_id", orch_req.request_id),
-                    "trace_id": (getattr(orch_result, "execution", {}) or {}).get("trace_id")
-                    or ((getattr(orch_result, "execution", {}) or {}).get("runtime", {}) or {}).get("trace_id"),
-                })
+                details.append(
+                    {
+                        "turn": turn_idx,
+                        "question": question,
+                        "expected_agent": expected_agent,
+                        "actual_domain": actual_domain,
+                        "ok": turn_ok,
+                        "request_id": getattr(orch_result, "request_id", orch_req.request_id),
+                        "trace_id": (getattr(orch_result, "execution", {}) or {}).get("trace_id")
+                        or ((getattr(orch_result, "execution", {}) or {}).get("runtime", {}) or {}).get("trace_id"),
+                    }
+                )
 
-            results.append(EvalResult(
-                test_id=f"routing_{idx}",
-                passed=passed,
-                scores={"accuracy": 1.0 if passed else 0.0},
-                detail=f"期望领域 {expected_agent} → {'全部命中' if passed else '存在偏离'}: " +
-                       "; ".join(
-                           f"turn{d['turn']}: {d['actual_domain']}{'(✓)' if d['ok'] else '(✗)'}"
-                           for d in details
-                       ),
-                metadata={"case": details},
-                failure_stage="" if passed else "routing",
-            ))
+            results.append(
+                EvalResult(
+                    test_id=f"routing_{idx}",
+                    passed=passed,
+                    scores={"accuracy": 1.0 if passed else 0.0},
+                    detail=f"期望领域 {expected_agent} → {'全部命中' if passed else '存在偏离'}: "
+                    + "; ".join(f"turn{d['turn']}: {d['actual_domain']}{'(✓)' if d['ok'] else '(✗)'}" for d in details),
+                    metadata={"case": details},
+                    failure_stage="" if passed else "routing",
+                )
+            )
         return results
 
     @staticmethod
@@ -896,7 +932,9 @@ class EndToEndEvaluator:
         execution = getattr(orch_result, "execution", {}) or {}
         verification = execution.get("verification", {}) if isinstance(execution, dict) else {}
         flags = set(verification.get("flags", []) if isinstance(verification, dict) else [])
-        if {"llm_ungrounded", "citation_without_evidence"} & flags or metadata.get("faithfulness", 1.0) < EndToEndEvaluator.PASS_THRESHOLD:
+        if {"llm_ungrounded", "citation_without_evidence"} & flags or metadata.get(
+            "faithfulness", 1.0
+        ) < EndToEndEvaluator.PASS_THRESHOLD:
             return "grounding"
         if "task_contract_failed" in flags or "write_claim_without_tool" in flags:
             return "verification"
@@ -926,8 +964,12 @@ class EndToEndEvaluator:
         return "[评测多轮历史]\n" + "\n".join(lines)
 
     def _detect_regressions(self, current: Dict[str, float]) -> List[str]:
-        """与上一次评测对比，找出退化超过 5% 的指标。"""
-        prev_report = self._history[-1] if self._history else self._baseline
+        """与持久化基线对比，找出退化超过 5% 的指标。
+
+        优先用持久化基线文件（跨进程/跨会话稳定）；无基线才退回进程内上次
+        评测。旧实现优先 _history[-1]：同一进程连跑两次时口径漂移会被误判。
+        """
+        prev_report = self._baseline or (self._history[-1] if self._history else None)
         if prev_report is None:
             return []
         prev = prev_report.avg_scores
@@ -936,9 +978,7 @@ class EndToEndEvaluator:
             if metric in prev and prev[metric] > 0:
                 delta = (value - prev[metric]) / prev[metric]
                 if delta < -0.05:
-                    regressions.append(
-                        f"{metric}: {prev[metric]:.3f} → {value:.3f} (退化 {abs(delta):.1%})"
-                    )
+                    regressions.append(f"{metric}: {prev[metric]:.3f} → {value:.3f} (退化 {abs(delta):.1%})")
         return regressions
 
     def _recommendations(
@@ -958,7 +998,9 @@ class EndToEndEvaluator:
         if scores.get("hit_rate@K", 1.0) < 0.8:
             recs.append("检索 HitRate@K < 80%：检查知识库覆盖度与分块质量，必要时补充文档或调低相关性阈值")
         if scores.get("recall@K", 1.0) < 0.6:
-            recs.append("检索 Recall@K 偏低：确认查询改写链路生效（Agent 调用 knowledge_search 应走 search_with_rewrite）")
+            recs.append(
+                "检索 Recall@K 偏低：确认查询改写链路生效（Agent 调用 knowledge_search 应走 search_with_rewrite）"
+            )
         if scores.get("faithfulness", 1.0) < 0.8:
             recs.append("回答忠实性偏低：提示 Agent 严格基于检索结果作答，禁止编造来源中不存在的信息")
         if not recs:
@@ -1023,38 +1065,42 @@ class EndToEndEvaluator:
 
 DEFAULT_INTENT_CASES: List[IntentTestCase] = [
     # 领域维度（路由依据）—— 覆盖"请求句式"不再丢领域
-    IntentTestCase("这学期选课什么时候开始？",   "academic"),
-    IntentTestCase("帮我查一下我的课表",          "personal"),
-    IntentTestCase("今天有什么课？",              "personal"),
-    IntentTestCase("我最近的考试安排？",          "personal"),
-    IntentTestCase("南校区食堂几点关门？",        "campus_life"),
+    IntentTestCase("这学期选课什么时候开始？", "academic"),
+    IntentTestCase("帮我查一下我的课表", "personal"),
+    IntentTestCase("今天有什么课？", "personal"),
+    IntentTestCase("我最近的考试安排？", "personal"),
+    IntentTestCase("南校区食堂几点关门？", "campus_life"),
     # 校园卡补办走事务/材料指引 → affairs（与 domains 0.95 规则、demo_cases 一致）
-    IntentTestCase("校园卡丢了怎么补办？",        "affairs"),
-    IntentTestCase("帮我查一下校园卡余额",        "campus_life"),
-    IntentTestCase("奖学金什么时候评定？",        "affairs"),
-    IntentTestCase("我要请假怎么走流程",          "affairs"),
-    IntentTestCase("教务系统登录不上怎么办？",    "it_help"),
-    IntentTestCase("校园网连不上",                "it_help"),
+    IntentTestCase("校园卡丢了怎么补办？", "affairs"),
+    IntentTestCase("帮我查一下校园卡余额", "campus_life"),
+    IntentTestCase("奖学金什么时候评定？", "affairs"),
+    IntentTestCase("我要请假怎么走流程", "affairs"),
+    IntentTestCase("教务系统登录不上怎么办？", "it_help"),
+    IntentTestCase("校园网连不上", "it_help"),
     # 动作维度（行为依据）
-    IntentTestCase("你好",                        "greeting"),
-    IntentTestCase("这个助手很实用！",            "feedback"),
-    IntentTestCase("宿舍热水一直不来！",          "complaint"),
+    IntentTestCase("你好", "greeting"),
+    IntentTestCase("这个助手很实用！", "feedback"),
+    IntentTestCase("宿舍热水一直不来！", "complaint"),
     # 追问继承（对话感知）：短句无领域关键词，应从历史继承领域
     IntentTestCase(
         "那几点开门呢？",
         "campus_life",
-        context={"history": [
-            {"role": "user", "content": "南校区食堂几点关门？"},
-            {"role": "assistant", "content": "南校区食堂一般晚上七点关门。"},
-        ]},
+        context={
+            "history": [
+                {"role": "user", "content": "南校区食堂几点关门？"},
+                {"role": "assistant", "content": "南校区食堂一般晚上七点关门。"},
+            ]
+        },
     ),
     IntentTestCase(
         "怎么重置？",
         "it_help",
-        context={"history": [
-            {"role": "user", "content": "教务系统密码忘了怎么办？"},
-            {"role": "assistant", "content": "可以通过统一身份认证自助重置密码。"},
-        ]},
+        context={
+            "history": [
+                {"role": "user", "content": "教务系统密码忘了怎么办？"},
+                {"role": "assistant", "content": "可以通过统一身份认证自助重置密码。"},
+            ]
+        },
     ),
 ]
 

@@ -2,6 +2,7 @@
 
 使用临时目录中的 JSON 数据文件（不依赖仓库 data/public 的真实数据）。
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -21,12 +22,30 @@ def _store(tmp_path) -> CampusInfoStore:
 def _shuttle_data():
     return {
         "routes": [
-            {"name": "南校区→北校区", "direction": "南→北", "pickup": "南校区东门",
-             "duration_min": 60, "departures": ["07:00", "08:00", "09:00", "16:30"], "days": "weekdays"},
-            {"name": "北校区→南校区", "direction": "北→南", "pickup": "北校区东门",
-             "duration_min": 60, "departures": ["07:30", "08:30", "09:30", "17:00"], "days": "weekdays"},
-            {"name": "南校区→北校区（双休）", "direction": "南→北", "pickup": "南校区东门",
-             "duration_min": 60, "departures": ["07:30", "13:00", "18:00"], "days": "weekend"},
+            {
+                "name": "南校区→北校区",
+                "direction": "南→北",
+                "pickup": "南校区东门",
+                "duration_min": 60,
+                "departures": ["07:00", "08:00", "09:00", "16:30"],
+                "days": "weekdays",
+            },
+            {
+                "name": "北校区→南校区",
+                "direction": "北→南",
+                "pickup": "北校区东门",
+                "duration_min": 60,
+                "departures": ["07:30", "08:30", "09:30", "17:00"],
+                "days": "weekdays",
+            },
+            {
+                "name": "南校区→北校区（双休）",
+                "direction": "南→北",
+                "pickup": "南校区东门",
+                "duration_min": 60,
+                "departures": ["07:30", "13:00", "18:00"],
+                "days": "weekend",
+            },
         ]
     }
 
@@ -35,7 +54,7 @@ def test_shuttle_weekday_weekend_filter(tmp_path):
     """工作日/周末班次按星期几过滤：周三只出工作日班次，周六只出双休班次。"""
     _write(tmp_path, "shuttle_schedule.json", _shuttle_data())
     store = _store(tmp_path)
-    weekday = store.next_shuttle(now=datetime(2026, 9, 9, 8, 0, tzinfo=UTC))   # 周三
+    weekday = store.next_shuttle(now=datetime(2026, 9, 9, 8, 0, tzinfo=UTC))  # 周三
     weekend = store.next_shuttle(now=datetime(2026, 9, 12, 8, 0, tzinfo=UTC))  # 周六
     assert len(weekday["routes"]) == 2
     assert all("双休" not in r["route"] for r in weekday["routes"])
@@ -84,10 +103,19 @@ def test_next_shuttle_missing_data(tmp_path):
 
 
 def test_building_search_by_alias(tmp_path):
-    _write(tmp_path, "buildings.json", [
-        {"name": "信远楼", "aliases": ["信远"], "campus": "南校区",
-         "location": "图书馆南侧", "description": "人文学院"},
-    ])
+    _write(
+        tmp_path,
+        "buildings.json",
+        [
+            {
+                "name": "信远楼",
+                "aliases": ["信远"],
+                "campus": "南校区",
+                "location": "图书馆南侧",
+                "description": "人文学院",
+            },
+        ],
+    )
     store = _store(tmp_path)
     found = store.find_building("信远")
     assert len(found) == 1
@@ -96,12 +124,20 @@ def test_building_search_by_alias(tmp_path):
 
 
 def test_venues_and_library(tmp_path):
-    _write(tmp_path, "venues.json", [
-        {"name": "南校区体育馆", "campus": "南校区", "open_hours": "8:00-22:00"},
-    ])
-    _write(tmp_path, "library.json", [
-        {"name": "南校区图书馆", "campus": "南校区", "open_hours": "8:00-22:00"},
-    ])
+    _write(
+        tmp_path,
+        "venues.json",
+        [
+            {"name": "南校区体育馆", "campus": "南校区", "open_hours": "8:00-22:00"},
+        ],
+    )
+    _write(
+        tmp_path,
+        "library.json",
+        [
+            {"name": "南校区图书馆", "campus": "南校区", "open_hours": "8:00-22:00"},
+        ],
+    )
     store = _store(tmp_path)
     assert store.list_venues() == [{"name": "南校区体育馆", "campus": "南校区", "open_hours": "8:00-22:00"}]
     assert store.library_info()["libraries"][0]["open_hours"] == "8:00-22:00"

@@ -9,6 +9,7 @@ Guard 拦截、Trace 埋点、Skill 解析、预算计数……全部通过同�
   - before 钩子按注册顺序执行，GuardRejection / BudgetExceeded 抛出后短路；
   - after 钩子按注册逆序执行且必然触发（单个钩子异常只记日志，不掩盖业务结果）。
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,31 +51,21 @@ class RuntimeMiddleware:
 
     name: str = "base"
 
-    async def before_run(self, ctx: Any) -> None:
-        ...
+    async def before_run(self, ctx: Any) -> None: ...
 
-    async def after_run(self, ctx: Any) -> None:
-        ...
+    async def after_run(self, ctx: Any) -> None: ...
 
-    async def before_model(self, ctx: Any) -> None:
-        ...
+    async def before_model(self, ctx: Any) -> None: ...
 
-    async def after_model(self, ctx: Any, response: Any) -> None:
-        ...
+    async def after_model(self, ctx: Any, response: Any) -> None: ...
 
-    async def before_tool(self, ctx: Any, tool_name: str, tool_input: Any) -> None:
-        ...
+    async def before_tool(self, ctx: Any, tool_name: str, tool_input: Any) -> None: ...
 
-    async def after_tool(
-        self, ctx: Any, tool_name: str, result: Any, error: Optional[str]
-    ) -> None:
-        ...
+    async def after_tool(self, ctx: Any, tool_name: str, result: Any, error: Optional[str]) -> None: ...
 
-    async def before_finish(self, ctx: Any) -> None:
-        ...
+    async def before_finish(self, ctx: Any) -> None: ...
 
-    async def after_finish(self, ctx: Any, result: Any) -> None:
-        ...
+    async def after_finish(self, ctx: Any, result: Any) -> None: ...
 
 
 class MiddlewareChain:
@@ -132,12 +123,8 @@ class MiddlewareChain:
     async def before_tool(self, ctx: Any, tool_name: str, tool_input: Any) -> None:
         await self._fire("before_tool", ctx, tool_name=tool_name, tool_input=tool_input)
 
-    async def after_tool(
-        self, ctx: Any, tool_name: str, result: Any, error: Optional[str]
-    ) -> None:
-        await self._fire_reverse(
-            "after_tool", ctx, tool_name=tool_name, result=result, error=error
-        )
+    async def after_tool(self, ctx: Any, tool_name: str, result: Any, error: Optional[str]) -> None:
+        await self._fire_reverse("after_tool", ctx, tool_name=tool_name, result=result, error=error)
 
     async def before_finish(self, ctx: Any) -> None:
         await self._fire("before_finish", ctx)

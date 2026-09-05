@@ -25,6 +25,7 @@ Working Memory 承载当前会话近期上下文，不计入 L0-L3：
   - Embedding 由本地 bge 中文模型生成（mcp.embeddings，ONNX，不依赖外部 API）；
     模型不可用时回退 ChromaDB 内置 all-MiniLM-L6-v2（collection 名随向量空间切换）
 """
+
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -47,9 +48,9 @@ logger = logging.getLogger(__name__)
 
 
 class MsgRole(Enum):
-    USER      = "user"
+    USER = "user"
     ASSISTANT = "assistant"
-    SYSTEM    = "system"
+    SYSTEM = "system"
 
 
 # ── 画像信号检测 ──────────────────────────────────────────────────────────────
@@ -117,25 +118,46 @@ def _fact_subsumed_by_profile(fact: str, profile: Dict[str, Any]) -> bool:
     entries_text = _norm_mem_text("\n".join(_profile_entries(profile)))
     if nf in entries_text:
         return True
-    return any(
-        ne and ne in nf
-        for ne in (_norm_mem_text(e) for e in _profile_entries(profile))
-    )
+    return any(ne and ne in nf for ne in (_norm_mem_text(e) for e in _profile_entries(profile)))
 
 
 # L1 按需召回停用 bigram：高频无区分度（"用户"是事实统一主语），命中不计相关性。
 # 时间词（今天/明天）也停用 —— 事实与查询里的时间表述太常见，不承载主题相关性。
-_FACT_STOP_BIGRAMS = frozenset({
-    "用户", "我们", "你们", "他们", "这个", "那个", "什么", "怎么", "可以",
-    "需要", "就是", "已经", "现在", "没有", "不是", "如果", "因为", "所以",
-    "还有", "自己", "今天", "明天", "上次", "平时", "周末",
-})
+_FACT_STOP_BIGRAMS = frozenset(
+    {
+        "用户",
+        "我们",
+        "你们",
+        "他们",
+        "这个",
+        "那个",
+        "什么",
+        "怎么",
+        "可以",
+        "需要",
+        "就是",
+        "已经",
+        "现在",
+        "没有",
+        "不是",
+        "如果",
+        "因为",
+        "所以",
+        "还有",
+        "自己",
+        "今天",
+        "明天",
+        "上次",
+        "平时",
+        "周末",
+    }
+)
 
 
 def _fact_bigrams(text: str) -> set:
     """字符 bigram 集合（中文 1 字产出 1 个 bigram）。"""
     norm = _norm_mem_text(text)
-    return {norm[i:i + 2] for i in range(len(norm) - 1)}
+    return {norm[i : i + 2] for i in range(len(norm) - 1)}
 
 
 def _fact_relevant_to_query(query: str, fact: str) -> bool:
@@ -154,21 +176,22 @@ def _fact_relevant_to_query(query: str, fact: str) -> bool:
 
 @dataclass
 class Message:
-    role:       MsgRole
-    content:    str
-    timestamp:  datetime = field(default_factory=datetime.now)
-    metadata:   Dict[str, Any] = field(default_factory=dict)
+    role: MsgRole
+    content: str
+    timestamp: datetime = field(default_factory=datetime.now)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class MemoryContext:
     """传给 Agent 的完整上下文（Working Memory + 分层记忆融合）。"""
-    recent_messages:  List[Message]   # 工作记忆：最近对话
-    relevant_history: List[str]       # 情景记忆：语义相关历史片段（L2 场景块优先）
-    user_profile:     Dict[str, Any]  # 用户画像：长期偏好、常用实体（L3）
-    summary:          str             # 当前会话摘要（压缩后）
-    facts:            List[str]       # 原子事实：按需召回的 L1 事实（与当前提问相关）
-    memory_trace:     Dict[str, Any]  # 各层命中统计（透出 API/前端，白盒演示用）
+
+    recent_messages: List[Message]  # 工作记忆：最近对话
+    relevant_history: List[str]  # 情景记忆：语义相关历史片段（L2 场景块优先）
+    user_profile: Dict[str, Any]  # 用户画像：长期偏好、常用实体（L3）
+    summary: str  # 当前会话摘要（压缩后）
+    facts: List[str]  # 原子事实：按需召回的 L1 事实（与当前提问相关）
+    memory_trace: Dict[str, Any]  # 各层命中统计（透出 API/前端，白盒演示用）
 
     @staticmethod
     def _clean(text: str) -> str:
@@ -203,27 +226,27 @@ class MemoryManager:
     Working Memory 存 Redis（TTL 24h），不计入 L0-L3。
     """
 
-    WORKING_MAX   = 20    # 工作记忆最大条数，超过则触发压缩
-    COMPRESS_AT   = 15    # 达到此条数时压缩，保留摘要 + 最近 5 条
-    HISTORY_TOP_K = 5     # 情景记忆检索返回条数（场景块优先取 2 条）
+    WORKING_MAX = 20  # 工作记忆最大条数，超过则触发压缩
+    COMPRESS_AT = 15  # 达到此条数时压缩，保留摘要 + 最近 5 条
+    HISTORY_TOP_K = 5  # 情景记忆检索返回条数（场景块优先取 2 条）
 
     def __init__(
         self,
-        redis_url:    str = "redis://localhost:6379/0",
-        chroma_host:  str = "localhost",
-        chroma_port:  int = 8000,
-        chroma_path:  str = "./data/chroma",
-        api_key:      str = "",
-        base_url:     Optional[str] = None,
-        model:        str = "claude-3-5-sonnet-20241022",
+        redis_url: str = "redis://localhost:6379/0",
+        chroma_host: str = "localhost",
+        chroma_port: int = 8000,
+        chroma_path: str = "./data/chroma",
+        api_key: str = "",
+        base_url: Optional[str] = None,
+        model: str = "claude-3-5-sonnet-20241022",
         layered_store: Optional[LayeredStore] = None,
-        gateway:      Optional[Any] = None,  # 统一模型调用入口（记忆提炼 LLM 调用）
+        gateway: Optional[Any] = None,  # 统一模型调用入口（记忆提炼 LLM 调用）
     ):
         kwargs: Dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
         self._client = AsyncAnthropic(**kwargs)
-        self._model  = model
+        self._model = model
         self._gateway = gateway
 
         # L0/L1/L3 数据底座（SQLite，可注入以便测试替换）
@@ -231,7 +254,8 @@ class MemoryManager:
         # 记忆模块自身的 LLM 调用计数（画像提炼 + 摘要压缩），供评测统计调用率
         self.llm_call_count = 0
 
-        # 增量提炼并发锁（每 user:conv 一把，防连续对话时后台任务重叠提炼同一区间）
+        # 会话级互斥锁（每 user:conv 一把，画像提炼与工作记忆压缩共用；
+        # 有界清理见 _conv_lock，防止长期运行随会话数无界增长）
         self._extract_locks: Dict[str, asyncio.Lock] = {}
 
         self._redis = redis.from_url(redis_url, decode_responses=True)
@@ -268,7 +292,8 @@ class MemoryManager:
         )
         # 用户画像：存储提炼出的偏好和实体（只按 user_id 精确读取，不做向量查询）
         self._profile = chroma.get_or_create_collection(
-            profile_name, metadata={"hnsw:space": "cosine", "description": "用户画像（bge）"},
+            profile_name,
+            metadata={"hnsw:space": "cosine", "description": "用户画像（bge）"},
             embedding_function=embedding_function,
         )
 
@@ -294,8 +319,7 @@ class MemoryManager:
                 metas = records.get("metadatas") or []
                 if ids and docs:
                     current.upsert(ids=ids, documents=docs, metadatas=metas)
-                    logger.info("记忆已从 %s 重新索引 %d 条到 %s",
-                                previous, len(ids), current.name)
+                    logger.info("记忆已从 %s 重新索引 %d 条到 %s", previous, len(ids), current.name)
             except Exception as ex:
                 logger.debug("记忆迁移 %s 跳过（可忽略）: %s", previous, ex)
 
@@ -305,41 +329,61 @@ class MemoryManager:
         self,
         user_id: str,
         conv_id: str,
-        role:    MsgRole,
+        role: MsgRole,
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """将一条消息写入工作记忆，超阈值时自动压缩。"""
         user_id = self._safe_text(user_id)
         conv_id = self._safe_text(conv_id)
-        clean_metadata = {
-            self._safe_text(k): self._safe_metadata_value(v)
-            for k, v in (metadata or {}).items()
-        }
+        clean_metadata = {self._safe_text(k): self._safe_metadata_value(v) for k, v in (metadata or {}).items()}
         msg = Message(role=role, content=self._safe_text(content), metadata=clean_metadata)
         key = self._wm_key(user_id, conv_id)
 
         # 追加到 Redis 列表（左推，最新在前）
-        await self._redis.lpush(key, json.dumps({
-            "role":      msg.role.value,
-            "content":   msg.content,
-            "ts":        msg.timestamp.isoformat(),
-            "metadata":  msg.metadata,
-        }))
+        await self._redis.lpush(
+            key,
+            json.dumps(
+                {
+                    "role": msg.role.value,
+                    "content": msg.content,
+                    "ts": msg.timestamp.isoformat(),
+                    "metadata": msg.metadata,
+                }
+            ),
+        )
         await self._redis.expire(key, 86400)  # 24h TTL
 
         # L0 原文落库（分层记忆的证据链锚点，永不丢失）。
         # 写入失败只告警不阻断主链路（记忆是增强，不是依赖）。
         try:
-            await self._layered.append_raw(
-                user_id, conv_id, msg.role.value, msg.content, clean_metadata
-            )
+            await self._layered.append_raw(user_id, conv_id, msg.role.value, msg.content, clean_metadata)
         except Exception as ex:
             logger.warning(f"L0 原文写入失败 user={user_id}: {ex}")
 
-        # 超过压缩阈值时触发压缩
+        # 超过压缩阈值时触发压缩。
+        # 锁内二次检查：并发 add_message 都可能看到 llen >= 阈值，若不互斥，
+        # 两个 _compress 会各自 delete + 回填自己读到的 5 条，后写者丢消息。
         if await self._redis.llen(key) >= self.COMPRESS_AT:
-            await self._compress(user_id, conv_id)
+            async with self._conv_lock(user_id, conv_id):
+                if await self._redis.llen(key) >= self.COMPRESS_AT:
+                    await self._compress(user_id, conv_id)
+
+    def _conv_lock(self, user_id: str, conv_id: str) -> asyncio.Lock:
+        """会话级互斥锁，画像提炼与工作记忆压缩共用。
+
+        字典必须有界：每个会话一把锁且从不清理的话，长期运行会随会话数
+        无限增长。超上限时清理当前未被持有的锁（持锁中的绝不动）。
+        """
+        key = f"{user_id}:{conv_id}"
+        lock = self._extract_locks.get(key)
+        if lock is None:
+            lock = self._extract_locks.setdefault(key, asyncio.Lock())
+            if len(self._extract_locks) > 512:
+                idle = [k for k, v in self._extract_locks.items() if not v.locked() and k != key]
+                for k in idle[: len(idle) - 256]:
+                    self._extract_locks.pop(k, None)
+        return lock
 
     async def update_profile(self, user_id: str, conv_id: str) -> None:
         """
@@ -371,13 +415,11 @@ class MemoryManager:
             logger.debug(f"无画像信号，跳过提炼: {user_id}")
             return
 
-        lock = self._extract_locks.setdefault(f"{user_id}:{conv_id}", asyncio.Lock())
+        lock = self._conv_lock(user_id, conv_id)
         async with lock:
             await self._extract_incremental(user_id, conv_id, messages)
 
-    async def _extract_incremental(
-        self, user_id: str, conv_id: str, messages: List["Message"]
-    ) -> None:
+    async def _extract_incremental(self, user_id: str, conv_id: str, messages: List["Message"]) -> None:
         """锁内执行：取增量区间 → 一次 LLM 双产出 → 落库 → 推进水位。"""
         last_turn = await self._layered.get_extract_mark(user_id, conv_id)
         max_turn = await self._layered.get_last_turn(user_id, conv_id)
@@ -391,13 +433,9 @@ class MemoryManager:
             incremental = messages
 
         if isinstance(incremental[0], dict):  # L0 原始行（get_raw_range 返回字典）
-            text = self._safe_text("\n".join(
-                f"{r.get('role', '')}: {r.get('content', '')}" for r in incremental
-            ))
+            text = self._safe_text("\n".join(f"{r.get('role', '')}: {r.get('content', '')}" for r in incremental))
         else:  # 回退路径：工作记忆 Message 对象
-            text = self._safe_text("\n".join(
-                f"{m.role.value}: {m.content}" for m in incremental
-            ))
+            text = self._safe_text("\n".join(f"{m.role.value}: {m.content}" for m in incremental))
         existing = await self._get_profile(user_id)
         existing_text = self._safe_text(json.dumps(existing, ensure_ascii=False)) if existing else "（无既有画像）"
         prompt = f"""从以下西电校园用户对话中提炼用户偏好、关键实体和原子事实，返回 JSON。
@@ -414,24 +452,27 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
         prompt = self._safe_text(prompt)
 
         try:
-            self.llm_call_count += 1
             if self._gateway is not None:
                 result = await self._gateway.call(
                     client=self._client,
                     model=self._model,
                     messages=[{"role": "user", "content": prompt}],
                     span_name="memory_extract",
-                    max_tokens=768, temperature=0.0,
+                    max_tokens=768,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                 )
                 resp = result.response
             else:
                 resp = await self._client.messages.create(
-                    model=self._model, max_tokens=768, temperature=0.0,
+                    model=self._model,
+                    max_tokens=768,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                     messages=[{"role": "user", "content": prompt}],
                 )
             raw = resp.content[0].text
+            self.llm_call_count += 1  # 统计成功调用而非尝试（口径：调用率分母是成功次数）
             s, e = raw.find("{"), raw.rfind("}") + 1
             profile_data = json.loads(raw[s:e])
 
@@ -439,43 +480,40 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
             prefs = profile_data.get("preferences") if isinstance(profile_data.get("preferences"), list) else []
             profile_data["preferences"] = prefs[:20]
             entities = profile_data.get("entities") if isinstance(profile_data.get("entities"), dict) else {}
-            profile_data["entities"] = {
-                k: (v[:10] if isinstance(v, list) else v) for k, v in entities.items()
-            }
+            profile_data["entities"] = {k: (v[:10] if isinstance(v, list) else v) for k, v in entities.items()}
 
             # L1 原子事实落库（带证据链：来源会话 + 当前轮次锚点）
             facts_raw = profile_data.get("facts") if isinstance(profile_data.get("facts"), list) else []
             source_turn = await self._layered.get_last_turn(user_id, conv_id)
             facts = [
-                {"fact": str(f.get("fact") or "").strip(),
-                 "category": str(f.get("category") or "preference"),
-                 "source_conv": conv_id, "source_turn": source_turn}
-                for f in facts_raw[:10] if isinstance(f, dict) and str(f.get("fact") or "").strip()
+                {
+                    "fact": str(f.get("fact") or "").strip(),
+                    "category": str(f.get("category") or "preference"),
+                    "source_conv": conv_id,
+                    "source_turn": source_turn,
+                }
+                for f in facts_raw[:10]
+                if isinstance(f, dict) and str(f.get("fact") or "").strip()
             ]
             # L1/L3 分工去重：画像已覆盖（偏好/实体条目是事实子串等）的事实不落 L1，
             # 避免同一信息既在画像又在事实层（LLM 输出不可信，代码侧硬约束兜底）
-            facts = [
-                f for f in facts
-                if not _fact_subsumed_by_profile(f["fact"], profile_data)
-            ]
+            facts = [f for f in facts if not _fact_subsumed_by_profile(f["fact"], profile_data)]
             added = await self._layered.add_facts(user_id, facts)
             if added:
                 logger.info(f"原子事实新增 {added} 条: {user_id}")
 
             # L3 画像：用户级单条（聚合）+ 版本历史（可回滚）
-            doc_id = f"{user_id}_profile"   # 用户级单条（聚合）
+            doc_id = f"{user_id}_profile"  # 用户级单条（聚合）
             doc_text = self._safe_text(json.dumps(profile_data, ensure_ascii=False))
 
             # 直接传 documents，让 ChromaDB 内置模型生成 embedding（不依赖外部 API）
-            await asyncio.to_thread(self._profile.upsert,
+            await asyncio.to_thread(
+                self._profile.upsert,
                 ids=[doc_id],
                 documents=[doc_text],
-                metadatas=[{"user_id": user_id, "conv_id": conv_id,
-                            "ts": datetime.now().astimezone().isoformat()}],
+                metadatas=[{"user_id": user_id, "conv_id": conv_id, "ts": datetime.now().astimezone().isoformat()}],
             )
-            await self._layered.save_profile_version(
-                user_id, doc_text, reason=f"signal: {conv_id}"
-            )
+            await self._layered.save_profile_version(user_id, doc_text, reason=f"signal: {conv_id}")
             # 提炼成功才推进水位（失败不推进，下次幂等重试同一区间）
             await self._layered.set_extract_mark(user_id, conv_id, max_turn)
             logger.info(f"用户画像已更新: {user_id}（{len(prefs)} 条偏好，{added} 条新事实）")
@@ -501,9 +539,7 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
 
         # 2. 情景记忆（跨会话语义检索，L2 场景块优先）
         search_query = query or (recent[-1].content if recent else "")
-        history, layer_counts = await self._search_episodic(
-            user_id, search_query
-        )
+        history, layer_counts = await self._search_episodic(user_id, search_query)
 
         # 3. 用户画像（L3，聚合画像 —— 常驻注入；先读：L1 过滤依赖画像）
         profile = await self._get_profile(user_id)
@@ -513,7 +549,8 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
         #    ② 与当前提问相关才注入（query 为空时保守回退全量）。
         facts = await self._list_facts(user_id)
         injected_facts = [
-            f["fact"] for f in facts
+            f["fact"]
+            for f in facts
             if not _fact_subsumed_by_profile(f["fact"], profile)
             and (not search_query or _fact_relevant_to_query(search_query, f["fact"]))
         ][:8]
@@ -566,8 +603,8 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
         if len(messages) < self.COMPRESS_AT:
             return
 
-        to_compress = messages[:-5]   # 保留最近 5 条
-        keep        = messages[-5:]
+        to_compress = messages[:-5]  # 保留最近 5 条
+        keep = messages[-5:]
 
         # LLM 场景化摘要
         text = self._safe_text("\n".join(f"{m.role.value}: {m.content}" for m in to_compress))
@@ -577,51 +614,66 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
             f"对话:\n{text}"
         )
         try:
-            self.llm_call_count += 1
             if self._gateway is not None:
                 result = await self._gateway.call(
                     client=self._client,
                     model=self._model,
                     messages=[{"role": "user", "content": prompt}],
                     span_name="memory_summarize",
-                    max_tokens=256, temperature=0.0,
+                    max_tokens=256,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                 )
                 resp = result.response
             else:
                 resp = await self._client.messages.create(
-                    model=self._model, max_tokens=256, temperature=0.0,
+                    model=self._model,
+                    max_tokens=256,
+                    temperature=0.0,
                     thinking={"type": "disabled"},
                     messages=[{"role": "user", "content": prompt}],
                 )
             summary = self._safe_text(resp.content[0].text).strip()
-        except Exception:
-            summary = f"对话包含 {len(to_compress)} 条消息（摘要生成失败）"
+            self.llm_call_count += 1
+        except Exception as ex:
+            # 摘要失败时不产生任何占位内容：占位文本一旦作为场景块写入 L2，
+            # 之后会被语义检索当正常记忆召回注入 prompt（污染下游）。
+            # 工作记忆仍照常截断（L0 原文兜底，截断内容可回溯），仅跳过 L2 落库。
+            summary = ""
+            logger.warning(f"工作记忆压缩摘要生成失败（跳过 L2，仅截断工作记忆）: {ex}")
 
-        # 存摘要到 Redis
-        skey = self._summary_key(user_id, conv_id)
-        old_summary = await self._redis.get(skey) or ""
-        new_summary = self._safe_text(f"{old_summary}\n{summary}").strip()
-        await self._redis.setex(skey, 86400, new_summary)
+        key = self._wm_key(user_id, conv_id)
+        if summary:
+            # 存摘要到 Redis
+            skey = self._summary_key(user_id, conv_id)
+            old_summary = await self._redis.get(skey) or ""
+            new_summary = self._safe_text(f"{old_summary}\n{summary}").strip()
+            await self._redis.setex(skey, 86400, new_summary)
 
-        # 场景块存入情景记忆（L2，原文由 L0 兜底）
-        await self._store_episodic(user_id, conv_id, text, summary, layer="scenario")
+            # 场景块存入情景记忆（L2，原文由 L0 兜底）
+            await self._store_episodic(user_id, conv_id, text, summary, layer="scenario")
 
         # 重置工作记忆为最近 5 条
-        key = self._wm_key(user_id, conv_id)
         await self._redis.delete(key)
         for m in reversed(keep):
-            await self._redis.lpush(key, json.dumps({
-                "role": m.role.value, "content": m.content,
-                "ts": m.timestamp.isoformat(), "metadata": m.metadata,
-            }))
+            await self._redis.lpush(
+                key,
+                json.dumps(
+                    {
+                        "role": m.role.value,
+                        "content": m.content,
+                        "ts": m.timestamp.isoformat(),
+                        "metadata": m.metadata,
+                    }
+                ),
+            )
         await self._redis.expire(key, 86400)
         logger.info(f"工作记忆压缩完成: {user_id}/{conv_id}，场景块 {len(summary)} 字")
 
     # ── 内部辅助 ──────────────────────────────────────────────────────────────
 
     async def _get_working_memory(self, user_id: str, conv_id: str) -> List[Message]:
-        key  = self._wm_key(user_id, conv_id)
+        key = self._wm_key(user_id, conv_id)
         raws = await self._redis.lrange(key, 0, self.WORKING_MAX - 1)
         msgs = []
         for raw in reversed(raws):  # Redis lpush 最新在前，reversed 还原时序
@@ -629,22 +681,25 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
             # 跳过坏条目并告警，与 ChromaDB 各处的降级语义保持一致。
             try:
                 d = json.loads(raw)
-                msgs.append(Message(
-                    role=MsgRole(d["role"]),
-                    content=d["content"],
-                    timestamp=datetime.fromisoformat(d["ts"]),
-                    metadata=d.get("metadata", {}),
-                ))
+                msgs.append(
+                    Message(
+                        role=MsgRole(d["role"]),
+                        content=d["content"],
+                        timestamp=datetime.fromisoformat(d["ts"]),
+                        metadata=d.get("metadata", {}),
+                    )
+                )
             except (ValueError, TypeError, KeyError, json.JSONDecodeError) as ex:
                 logger.warning(
                     "工作记忆条目损坏已跳过 user=%s conv=%s raw=%r: %s",
-                    user_id, conv_id, raw[:120], ex,
+                    user_id,
+                    conv_id,
+                    raw[:120],
+                    ex,
                 )
         return msgs
 
-    async def _search_episodic(
-        self, user_id: str, query: str
-    ) -> tuple[List[str], Dict[str, int]]:
+    async def _search_episodic(self, user_id: str, query: str) -> tuple[List[str], Dict[str, int]]:
         """
         语义检索情景记忆（分层注入）：
           1. 先查 L2 场景块（layer=scenario，跨会话"快速恢复工作场景"）
@@ -657,29 +712,24 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
             return [], counts
 
         # L2 场景块优先（n=2）
-        scenario = await self._query_episodic(
-            user_id, query_text, n=2, layer="scenario"
-        )
+        scenario = await self._query_episodic(user_id, query_text, n=2, layer="scenario")
         counts["scenario"] = len(scenario)
 
         # 普通片段（排除场景块，Python 侧过滤兼容旧数据无 layer 字段）
-        segments = await self._query_episodic(
-            user_id, query_text, n=self.HISTORY_TOP_K
-        )
+        segments = await self._query_episodic(user_id, query_text, n=self.HISTORY_TOP_K)
         segments = [d for d in segments if d not in scenario]
         counts["segment"] = len(segments)
 
         return scenario + segments, counts
 
-    async def _query_episodic(
-        self, user_id: str, query_text: str, n: int, layer: Optional[str] = None
-    ) -> List[str]:
+    async def _query_episodic(self, user_id: str, query_text: str, n: int, layer: Optional[str] = None) -> List[str]:
         """单次 ChromaDB 语义查询；layer 指定时按 metadata 精确过滤。"""
         try:
             where: Dict[str, Any] = {"user_id": self._safe_text(user_id)}
             if layer:
                 where["layer"] = layer
-            results = await asyncio.to_thread(self._episodic.query,
+            results = await asyncio.to_thread(
+                self._episodic.query,
                 query_texts=[query_text],
                 n_results=n,
                 where=where,
@@ -720,11 +770,18 @@ facts 只提炼「画像未覆盖」的细粒度可溯源事实（做出的决�
             summary = self._safe_text(summary)
             doc_id = hashlib.md5(f"{user_id}{conv_id}{time.time()}".encode()).hexdigest()
             # 直接传 documents，ChromaDB 内置模型自动生成 embedding
-            await asyncio.to_thread(self._episodic.add,
+            await asyncio.to_thread(
+                self._episodic.add,
                 ids=[doc_id],
                 documents=[summary],
-                metadatas=[{"user_id": user_id, "conv_id": conv_id,
-                            "ts": datetime.now().astimezone().isoformat(), "layer": layer}],
+                metadatas=[
+                    {
+                        "user_id": user_id,
+                        "conv_id": conv_id,
+                        "ts": datetime.now().astimezone().isoformat(),
+                        "layer": layer,
+                    }
+                ],
             )
         except Exception as ex:
             logger.warning(f"存储情景记忆失败: {ex}")

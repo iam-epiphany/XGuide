@@ -5,6 +5,7 @@ RunState —— Agent Runtime 的单次运行状态载体。
 执行计数器、错误记录与 middleware 自由扩展的 meta。执行摘要由 summary() 输出，
 合并进 execution 元数据，是可观测性的统一出口（debug 面板可见）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,18 +20,18 @@ class RunState:
     request_id: str
     user_id: str = ""
     conv_id: str = ""
-    trace_id: str = ""               # 与请求级 Trace 对齐（TraceMiddleware 回填）
+    trace_id: str = ""  # 与请求级 Trace 对齐（TraceMiddleware 回填）
     message: str = ""
-    profile: str = ""                # fast / deep（路由后回填）
-    complexity_mode: str = ""        # single / parallel / dependent（路由后回填）
+    profile: str = ""  # fast / deep（路由后回填）
+    complexity_mode: str = ""  # single / parallel / dependent（路由后回填）
 
     started_at: float = field(default_factory=time.monotonic)
 
     # 执行计数器（BudgetMiddleware 等中间件维护）
-    step_count: int = 0              # 模型调用次数（before_model）
-    tool_call_count: int = 0         # 工具调用次数（before_tool）
-    tool_round_count: int = 0        # 工具调用轮次
-    retry_count: int = 0             # 失败降级次数（Fast→Deep）
+    step_count: int = 0  # 模型调用次数（before_model）
+    tool_call_count: int = 0  # 工具调用次数（before_tool）
+    tool_round_count: int = 0  # 工具调用轮次
+    retry_count: int = 0  # 失败降级次数（Fast→Deep）
     input_tokens: int = 0
     output_tokens: int = 0
 
@@ -60,6 +61,7 @@ class RunState:
         self.decision_trace[stage] = snapshot
         try:
             from core.tracing import current_trace
+
             trace = current_trace()
             if trace is not None:
                 trace.record_decision(stage, snapshot)
@@ -99,6 +101,7 @@ class RunState:
         self.tool_trace.append(detail)
         try:
             from core.tracing import current_trace
+
             trace = current_trace()
             if trace is not None:
                 trace.record_tool_call(detail)

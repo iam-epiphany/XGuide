@@ -41,6 +41,7 @@ SharedState 只保存 Task result/status/meta 与必要的依赖快照；后续 
 只能读取自己声明的 depends_on 结果，不默认注入全部历史任务内容
 （避免上下文膨胀与不必要耦合）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -81,12 +82,13 @@ class Task:
     domain 是领域挂载键（人格语境；Skill 平级发现，不按领域过滤），不参与 Agent 类选择 ——
     真正的 Agent 单位是围绕本 Task 的一次 TaskAgent Run。
     """
-    task_id:     str
-    domain:      IntentDomain             # 任务领域（人格/上下文挂载键）
-    goal:        str                      # 领域化任务目标（给 Agent 的指令）
-    message:     str                      # 自包含请求内容
-    action:      IntentAction = IntentAction.QUERY  # 任务自己的动作（决定 Run 执行策略）
-    depends_on:  List[str] = field(default_factory=list)  # 依赖的其他 task_id
+
+    task_id: str
+    domain: IntentDomain  # 任务领域（人格/上下文挂载键）
+    goal: str  # 领域化任务目标（给 Agent 的指令）
+    message: str  # 自包含请求内容
+    action: IntentAction = IntentAction.QUERY  # 任务自己的动作（决定 Run 执行策略）
+    depends_on: List[str] = field(default_factory=list)  # 依赖的其他 task_id
     # 任务级写工具能力（最小权限）：None = 不做任务级写限制（仍受 Action 策略约束）；
     # 非空 = 本任务只能调用列表内的写工具（读工具不受限，与 Action 策略取交集）。
     # 由 Planner 声明（规则链显式声明、写操作词族提示兜底、LLM 规划可输出）。
@@ -114,6 +116,7 @@ class Task:
 @dataclass
 class ExecutionPlan:
     """Planner 统一输出：任务 DAG + 推导出的复杂度模式。"""
+
     tasks: List[Task]
     reason: str = ""
     strategy: str = "fast_path"  # fast_path / llm / benchmark_single_agent
@@ -187,10 +190,7 @@ class SharedState:
         不默认注入全部历史任务内容（避免上下文膨胀与不必要耦合）；
         失败/阻塞任务不注入 —— 依赖任务不能把失败结果当成有效上下文。
         """
-        deps = [
-            dep for dep in task.depends_on
-            if self._status.get(dep) == TASK_SUCCESS and dep in self._results
-        ]
+        deps = [dep for dep in task.depends_on if self._status.get(dep) == TASK_SUCCESS and dep in self._results]
         if not deps:
             return ""
         return "\n\n".join(f"[{dep}]\n{self._results[dep].content}" for dep in deps)
@@ -199,9 +199,8 @@ class SharedState:
 def verify_task_contract(task: Task, response: Optional[AgentResponse]) -> Dict[str, Any]:
     """Task 后置条件的确定性校验（不调用 LLM，不阻断请求）。"""
     nonempty = bool(response is not None and (response.content or "").strip())
-    required_tool_ok = (
-        task.required_tool is None
-        or bool(response is not None and task.required_tool in response.tools_used)
+    required_tool_ok = task.required_tool is None or bool(
+        response is not None and task.required_tool in response.tools_used
     )
     checks = {
         "nonempty_output": nonempty,
@@ -228,18 +227,21 @@ class TaskPlanner:
     """
 
     GOAL_TEMPLATES: Dict[IntentDomain, str] = {
-        IntentDomain.ACADEMIC:    "从学业支持角度回答用户的请求（选课/课表/考试/成绩等）",
+        IntentDomain.ACADEMIC: "从学业支持角度回答用户的请求（选课/课表/考试/成绩等）",
         IntentDomain.CAMPUS_LIFE: "从校园生活角度回答用户的请求（宿舍/食堂/校车/天气等）",
-        IntentDomain.AFFAIRS:     "从校务办事角度回答用户的请求（校历/请假/奖学金/证明等）",
-        IntentDomain.IT_HELP:     "从 IT 支持角度回答用户的请求（教务系统/校园网/VPN/邮箱等）",
-        IntentDomain.PERSONAL:    "从个人助理角度回答用户的请求（我的课表/待办/考试安排等）",
+        IntentDomain.AFFAIRS: "从校务办事角度回答用户的请求（校历/请假/奖学金/证明等）",
+        IntentDomain.IT_HELP: "从 IT 支持角度回答用户的请求（教务系统/校园网/VPN/邮箱等）",
+        IntentDomain.PERSONAL: "从个人助理角度回答用户的请求（我的课表/待办/考试安排等）",
     }
 
     # 写工具提示（Fast Path 最小权限声明）：REQUEST 任务按写操作词族声明必要
     # 工具，避免"因为 REQUEST 就拿到所有写工具"。多词族命中取并集；未命中
     # （语义不明）不做任务级限制，由 Action 策略兜底。
     _WRITE_TOOL_HINTS: Tuple[Tuple[Tuple[str, ...], Tuple[str, ...]], ...] = (
-        (("添加", "新增", "记一下", "记个", "提醒我", "帮我记", "创建", "设个提醒", "定个提醒", "设置提醒"), ("add_todo",)),
+        (
+            ("添加", "新增", "记一下", "记个", "提醒我", "帮我记", "创建", "设个提醒", "定个提醒", "设置提醒"),
+            ("add_todo",),
+        ),
         (("标记完成", "标为完成", "设为完成", "勾选完成", "标成完成"), ("complete_todo",)),
         (("删除待办", "删除事项", "删掉", "移除待办"), ("delete_todo",)),
         (("修改待办", "修改事项", "改成", "改为", "延期", "提前"), ("update_todo",)),
@@ -284,21 +286,13 @@ class TaskPlanner:
         # 否则规划器偶发的领域漂移会让执行器选错领域人格和结构化工具，出现
         # "顶层识别为校务、实际按校园生活执行" 这类不可观测的执行偏差。
         # 多任务计划允许各子任务拥有不同领域，仍由其 DAG 结构表达协作关系。
-        if (
-            llm_plan is not None
-            and (
-                llm_plan.mode != "single"
-                or (
-                    llm_plan.tasks[0].domain == domain
-                    and llm_plan.tasks[0].action == action
-                )
-            )
+        if llm_plan is not None and (
+            llm_plan.mode != "single" or (llm_plan.tasks[0].domain == domain and llm_plan.tasks[0].action == action)
         ):
             return self._finalize_plan(llm_plan)
         if llm_plan is not None:
             logger.warning(
-                "LLM 单任务规划与顶层意图不一致，回落 Fast Path: "
-                "root=%s/%s planned=%s/%s",
+                "LLM 单任务规划与顶层意图不一致，回落 Fast Path: root=%s/%s planned=%s/%s",
                 domain.value,
                 action.value,
                 llm_plan.tasks[0].domain.value,
@@ -391,7 +385,11 @@ class TaskPlanner:
             if not task.inputs:
                 task.inputs = ["用户请求", *[f"任务 {dep} 的已验证结果" for dep in task.depends_on]]
             if not task.expected_output:
-                task.expected_output = "完成指定写操作并返回执行结果" if task.action == IntentAction.REQUEST else "与任务目标相关的可用答复"
+                task.expected_output = (
+                    "完成指定写操作并返回执行结果"
+                    if task.action == IntentAction.REQUEST
+                    else "与任务目标相关的可用答复"
+                )
             if not task.acceptance_criteria:
                 task.acceptance_criteria = ["返回非空结果"]
                 if task.required_tool:
@@ -402,8 +400,10 @@ class TaskPlanner:
                 if task.action == IntentAction.REQUEST:
                     task.risk_level = "high"
                 elif task.domain in {
-                    IntentDomain.ACADEMIC, IntentDomain.CAMPUS_LIFE,
-                    IntentDomain.AFFAIRS, IntentDomain.IT_HELP,
+                    IntentDomain.ACADEMIC,
+                    IntentDomain.CAMPUS_LIFE,
+                    IntentDomain.AFFAIRS,
+                    IntentDomain.IT_HELP,
                 }:
                     task.risk_level = "medium"
         return plan
@@ -430,8 +430,8 @@ class TaskPlanner:
         """
         msg = req.message
         has_schedule = any(keyword_hit(kw, msg) for kw in ("课表", "课程", "空闲", "上课", "没课", "有空"))
-        has_errand   = any(keyword_hit(kw, msg) for kw in ("校园卡", "办理", "材料", "缴费", "办证"))
-        has_todo     = any(keyword_hit(kw, msg) for kw in ("待办", "提醒", "记一下", "安排上", "安排"))
+        has_errand = any(keyword_hit(kw, msg) for kw in ("校园卡", "办理", "材料", "缴费", "办证"))
+        has_todo = any(keyword_hit(kw, msg) for kw in ("待办", "提醒", "记一下", "安排上", "安排"))
         if not (has_schedule and has_errand and has_todo):
             return None
         content = cls._extract_errand_content(msg)
@@ -509,9 +509,7 @@ class TaskPlanner:
     # ── LLM 规划升级（"拿不准"时）──────────────────────────────────────────
 
     # 升级预筛的从句切分器
-    _UPGRADE_CLAUSE_RE = re.compile(
-        r"[，。；、,;]+|(?:同时|另外|顺便|然后|再|还要|以及|并且)"
-    )
+    _UPGRADE_CLAUSE_RE = re.compile(r"[，。；、,;]+|(?:同时|另外|顺便|然后|再|还要|以及|并且)")
 
     def _needs_llm_planning(self, req: Request) -> bool:
         """
@@ -535,15 +533,10 @@ class TaskPlanner:
         if len(msg) > 24 and len(clauses) >= 2:
             return True
         lowered = msg.lower()
-        hit_domains = {
-            domain for domain, kws in DOMAIN_KEYWORDS.items()
-            if any(keyword_hit(kw, lowered) for kw in kws)
-        }
+        hit_domains = {domain for domain, kws in DOMAIN_KEYWORDS.items() if any(keyword_hit(kw, lowered) for kw in kws)}
         if len(hit_domains) >= 2:
             return True
-        if len(clauses) >= 2 and any(
-            keyword_hit(kw, lowered) for kw in ACTION_KEYWORDS.get(IntentAction.REQUEST, [])
-        ):
+        if len(clauses) >= 2 and any(keyword_hit(kw, lowered) for kw in ACTION_KEYWORDS.get(IntentAction.REQUEST, [])):
             return True
         return False
 
@@ -567,7 +560,7 @@ class TaskPlanner:
             "- domain 可选值: academic, campus_life, affairs, it_help, personal\n"
             "- action: query=查询咨询；request=需要系统写数据/产生副作用（创建待办等）\n"
             "- 只有明确需要写操作的任务才是 request，查询类任务一律 query\n"
-            "- tools 可选：本任务允许调用的工具名数组（最小权限，如 [\"add_todo\"]）；"
+            '- tools 可选：本任务允许调用的工具名数组（最小权限，如 ["add_todo"]）；'
             "查询类任务不写 tools 即可\n"
             "- Contract：inputs/expected_output/acceptance_criteria 描述执行边界；"
             "risk_level 只能是 low、medium、high。写操作必须 high；不确定时留空，系统会用确定性规则补全\n"
@@ -658,9 +651,7 @@ class TaskPlanner:
             depends = raw.get("depends_on") or []
             if isinstance(depends, str):
                 depends = [depends]
-            if not isinstance(depends, list) or not all(
-                isinstance(d, str) and d.strip() for d in depends
-            ):
+            if not isinstance(depends, list) or not all(isinstance(d, str) and d.strip() for d in depends):
                 return None
             deps = list(dict.fromkeys(d.strip() for d in depends))
             # 任务级写工具能力（最小权限）：LLM 声明了 tools 就必须合法；
@@ -669,13 +660,9 @@ class TaskPlanner:
             raw_tools = raw.get("tools")
             allowed_write_tools: Optional[List[str]] = None
             if raw_tools is not None:
-                if not isinstance(raw_tools, list) or not all(
-                    isinstance(t, str) and t.strip() for t in raw_tools
-                ):
+                if not isinstance(raw_tools, list) or not all(isinstance(t, str) and t.strip() for t in raw_tools):
                     return None
-                if self._tool_names is not None and any(
-                    t not in self._tool_names for t in raw_tools
-                ):
+                if self._tool_names is not None and any(t not in self._tool_names for t in raw_tools):
                     return None  # 引用了未注册工具 → 整链作废（fail-closed）
                 allowed_write_tools = list(dict.fromkeys(t.strip() for t in raw_tools))
             # Contract 字段可由 LLM 细化，但类型/风险等级必须通过硬校验；缺省
@@ -690,19 +677,21 @@ class TaskPlanner:
             raw_risk = str(raw.get("risk_level", "low")).lower()
             if not isinstance(raw_output, str) or raw_risk not in {"low", "medium", "high"}:
                 return None
-            tasks.append(Task(
-                task_id=task_id,
-                domain=domain,
-                action=action,
-                goal=goal,
-                message=message,
-                depends_on=deps,
-                allowed_write_tools=allowed_write_tools,
-                inputs=list(dict.fromkeys(v.strip() for v in raw_inputs)),
-                expected_output=raw_output.strip(),
-                acceptance_criteria=list(dict.fromkeys(v.strip() for v in raw_criteria)),
-                risk_level=raw_risk,
-            ))
+            tasks.append(
+                Task(
+                    task_id=task_id,
+                    domain=domain,
+                    action=action,
+                    goal=goal,
+                    message=message,
+                    depends_on=deps,
+                    allowed_write_tools=allowed_write_tools,
+                    inputs=list(dict.fromkeys(v.strip() for v in raw_inputs)),
+                    expected_output=raw_output.strip(),
+                    acceptance_criteria=list(dict.fromkeys(v.strip() for v in raw_criteria)),
+                    risk_level=raw_risk,
+                )
+            )
             seen_ids.add(task_id)
         # 依赖引用与无环校验
         for task in tasks:
@@ -767,21 +756,27 @@ class TaskExecutor:
         while pending:
             # 1. 失败传播：依赖中存在 FAILED/BLOCKED 的任务 → 本任务 BLOCKED（不执行）
             blocked = [
-                t for t in pending.values()
+                t
+                for t in pending.values()
                 if any(shared.status(dep) in (TASK_FAILED, TASK_BLOCKED) for dep in t.depends_on)
             ]
             for t in blocked:
                 logger.warning(f"任务 {t.task_id} 依赖失败，标记 BLOCKED")
-                shared.set_result(t.task_id, AgentResponse(
-                    content="（该任务因依赖失败已跳过）", success=False,
-                    agent_type=t.domain.value, task_id=t.task_id,
-                ), status=TASK_BLOCKED)
+                shared.set_result(
+                    t.task_id,
+                    AgentResponse(
+                        content="（该任务因依赖失败已跳过）",
+                        success=False,
+                        agent_type=t.domain.value,
+                        task_id=t.task_id,
+                    ),
+                    status=TASK_BLOCKED,
+                )
                 shared.set_task_meta(t, TASK_BLOCKED)
                 del pending[t.task_id]
 
             # 2. 当前波：依赖全部 SUCCESS 的任务
-            wave = [t for t in pending.values()
-                    if all(shared.done(dep) for dep in t.depends_on)]
+            wave = [t for t in pending.values() if all(shared.done(dep) for dep in t.depends_on)]
             if not wave:
                 if not pending:
                     break  # 全部任务已结束（成功/失败/阻塞）
@@ -810,10 +805,16 @@ class TaskExecutor:
                     shared.set_task_meta(t, status, duration_ms, response=r)
                 else:
                     logger.warning(f"任务 {t.task_id} 执行失败: {r}")
-                    shared.set_result(t.task_id, AgentResponse(
-                        content="（该子任务处理失败）", success=False,
-                        agent_type=t.domain.value, task_id=t.task_id,
-                    ), status=TASK_FAILED)
+                    shared.set_result(
+                        t.task_id,
+                        AgentResponse(
+                            content="（该子任务处理失败）",
+                            success=False,
+                            agent_type=t.domain.value,
+                            task_id=t.task_id,
+                        ),
+                        status=TASK_FAILED,
+                    )
                     shared.set_task_meta(t, TASK_FAILED, duration_ms)
 
         if getattr(req, "state", None) is not None:
@@ -829,12 +830,11 @@ class Synthesizer:
     只读 SharedState 的最终结果做合并。LLM 失败时降级为规则拼接。
     """
 
-    def __init__(self, client: AsyncAnthropic, model: str, max_tokens: int = 1024,
-                 gateway: Optional[Any] = None):
+    def __init__(self, client: AsyncAnthropic, model: str, max_tokens: int = 1024, gateway: Optional[Any] = None):
         self._client = client
-        self._model  = model
+        self._model = model
         self._max_tokens = max_tokens  # 合成预算（默认 1024，可由 ExecutionPolicy 覆盖）
-        self._gateway = gateway        # 统一模型调用入口（编排器注入；None 时直接调用）
+        self._gateway = gateway  # 统一模型调用入口（编排器注入；None 时直接调用）
 
     async def synthesize(
         self,
@@ -842,8 +842,11 @@ class Synthesizer:
         results: List[AgentResponse],
     ) -> str:
         parts = [
-            (r.label, r.content) for r in results
-            if r.success and r.content and r.content != "（该子任务处理失败）"
+            (r.label, r.content)
+            for r in results
+            if r.success
+            and r.content
+            and r.content != "（该子任务处理失败）"
             and "（该任务因依赖失败已跳过）" not in r.content
         ]
         if not parts:
@@ -865,10 +868,12 @@ class Synthesizer:
                     "model": self._model,
                     "max_tokens": self._max_tokens,
                     "system": system,
-                    "messages": [{
-                        "role": "user",
-                        "content": f"用户请求: {req.message}\n\n各子任务回答:\n{content}",
-                    }],
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": f"用户请求: {req.message}\n\n各子任务回答:\n{content}",
+                        }
+                    ],
                 }
                 if self._gateway is not None:
                     result = await self._gateway.call(
@@ -880,9 +885,7 @@ class Synthesizer:
                     resp = result.response
                 else:
                     resp = await self._client.messages.create(**kwargs)
-            text = "".join(
-                b.text for b in resp.content if getattr(b, "type", "") == "text"
-            ).strip()
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
             if text:
                 return text
         except Exception as ex:

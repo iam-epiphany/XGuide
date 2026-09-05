@@ -18,6 +18,7 @@
 
 输出：data/eval/error_analysis/dialog_trace.json（每轮完整 trace + 汇总）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,19 +51,21 @@ async def analyze_answer(answer: str, evidences: list[dict]) -> list[dict]:
     trace = await grounding_trace(answer, evidences)
     analyzed = []
     for claim in trace["claims"]:
-        analyzed.append({
-            "sentence": claim["claim"],
-            "evidence_idx": claim["selected_evidence_idx"],
-            "evidence_title": claim["selected_title"],
-            "dice": claim["best_dice"],
-            "cos": claim["best_cos"],
-            "supported": claim["status"] == "supported",
-            "status": claim["status"],
-            "decision_source": claim["decision_source"],
-            "factual": claim["factual"],
-            "guard_reasons": claim["hard_guard"]["reasons"],
-            "citation": claim["citation"],
-        })
+        analyzed.append(
+            {
+                "sentence": claim["claim"],
+                "evidence_idx": claim["selected_evidence_idx"],
+                "evidence_title": claim["selected_title"],
+                "dice": claim["best_dice"],
+                "cos": claim["best_cos"],
+                "supported": claim["status"] == "supported",
+                "status": claim["status"],
+                "decision_source": claim["decision_source"],
+                "factual": claim["factual"],
+                "guard_reasons": claim["hard_guard"]["reasons"],
+                "citation": claim["citation"],
+            }
+        )
     return analyzed
 
 
@@ -97,21 +100,23 @@ async def run_trace(cases, smoke: bool) -> list[dict]:
             analyzed = await analyze_answer(answer, evidences)
             citations = extract_citations(answer)
             n_sources = len(evidences)
-            turns_trace.append({
-                "case_id": case.get("id", f"case-{i}"),
-                "turn": turn_idx,
-                "question": question,
-                "answer": answer,
-                "n_sources": n_sources,
-                "source_titles": [str(e.get("title", "")) for e in evidences],
-                "citations_in_answer": citations,
-                "citation_valid": all(1 <= c <= n_sources for c in citations),
-                "has_citation": len(citations) > 0,
-                "claims": analyzed,
-                "supported_claim_ratio": round(
-                    sum(1 for a in analyzed if a["supported"]) / len(analyzed), 4
-                ) if analyzed else 0.0,
-            })
+            turns_trace.append(
+                {
+                    "case_id": case.get("id", f"case-{i}"),
+                    "turn": turn_idx,
+                    "question": question,
+                    "answer": answer,
+                    "n_sources": n_sources,
+                    "source_titles": [str(e.get("title", "")) for e in evidences],
+                    "citations_in_answer": citations,
+                    "citation_valid": all(1 <= c <= n_sources for c in citations),
+                    "has_citation": len(citations) > 0,
+                    "claims": analyzed,
+                    "supported_claim_ratio": round(sum(1 for a in analyzed if a["supported"]) / len(analyzed), 4)
+                    if analyzed
+                    else 0.0,
+                }
+            )
             if smoke:
                 break
         if smoke:
@@ -131,9 +136,7 @@ def summarize(turns_trace: list[dict]) -> dict:
     no_ev = [t for t in turns_trace if t["n_sources"] == 0]
     cited = [t for t in turns_trace if t["has_citation"]]
     valid_cited = [t for t in cited if t["citation_valid"]]
-    unsupported_sents = [
-        (t, a) for t in turns_trace for a in t["claims"] if not a["supported"]
-    ]
+    unsupported_sents = [(t, a) for t in turns_trace for a in t["claims"] if not a["supported"]]
     # Hard/Soft Guard 命中分类统计：定位哪种冲突在真实对话中最常见
     reason_kinds: dict[str, int] = {}
     for t in turns_trace:
@@ -149,22 +152,27 @@ def summarize(turns_trace: list[dict]) -> dict:
         "citation_rate": round(len(cited) / n, 4) if n else 0.0,
         "turns_with_valid_citation": len(valid_cited),
         "citation_correctness": round(len(valid_cited) / len(cited), 4) if cited else None,
-        "avg_supported_claim_ratio": round(
-            statistics.mean(t["supported_claim_ratio"] for t in has_ev), 4
-        ) if has_ev else None,
+        "avg_supported_claim_ratio": round(statistics.mean(t["supported_claim_ratio"] for t in has_ev), 4)
+        if has_ev
+        else None,
         "unsupported_claim_count": len(unsupported_sents),
         "guard_reason_kinds": dict(sorted(reason_kinds.items(), key=lambda kv: -kv[1])),
         "unsupported_examples": [
-            {"case_id": t["case_id"], "turn": t["turn"], "sentence": a["sentence"],
-             "dice": a["dice"], "cos": a["cos"], "evidence_title": a["evidence_title"],
-             "status": a["status"], "decision_source": a["decision_source"],
-             "guard_reasons": a["guard_reasons"], "question": t["question"]}
+            {
+                "case_id": t["case_id"],
+                "turn": t["turn"],
+                "sentence": a["sentence"],
+                "dice": a["dice"],
+                "cos": a["cos"],
+                "evidence_title": a["evidence_title"],
+                "status": a["status"],
+                "decision_source": a["decision_source"],
+                "guard_reasons": a["guard_reasons"],
+                "question": t["question"],
+            }
             for t, a in unsupported_sents[:15]
         ],
-        "no_evidence_turns": [
-            {"case_id": t["case_id"], "turn": t["turn"], "question": t["question"]}
-            for t in no_ev
-        ],
+        "no_evidence_turns": [{"case_id": t["case_id"], "turn": t["turn"], "question": t["question"]} for t in no_ev],
     }
 
 

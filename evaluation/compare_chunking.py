@@ -22,6 +22,7 @@
   - 需要可解析的文档（.pdf/.docx/...），解析走 mcp.document_parser（anydoc）；
   - 纯离线：不启动服务、不下载模型。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,8 +77,9 @@ def analyze(kb: KnowledgeBase, text: str, chunk_size: int, overlap: int) -> dict
 
     def chain_blocks(chunks: list[str]) -> int:
         """新口径：块首行是标题链（去井号后以 > 连接，单标题块首即标题）。"""
-        return sum(1 for c in chunks
-                   if re.match(r"^[^#|\s].* > ", c.split("\n")[0]) or _HEADING_RE.match(c.split("\n")[0]))
+        return sum(
+            1 for c in chunks if re.match(r"^[^#|\s].* > ", c.split("\n")[0]) or _HEADING_RE.match(c.split("\n")[0])
+        )
 
     def stats(chunks: list[str]) -> dict:
         return {
@@ -106,8 +108,10 @@ def main() -> None:
         print(f"目录无文件: {args.dir}")
         sys.exit(1)
 
-    print(f"{'文档':<30} {'旧块数':>6} {'新块数':>6} {'旧标题行入块':>9} {'新链头入块':>8} "
-          f"{'旧拆表格':>7} {'新拆表格':>7} {'旧超预算':>7} {'新超预算':>7}")
+    print(
+        f"{'文档':<30} {'旧块数':>6} {'新块数':>6} {'旧标题行入块':>9} {'新链头入块':>8} "
+        f"{'旧拆表格':>7} {'新拆表格':>7} {'旧超预算':>7} {'新超预算':>7}"
+    )
     print("-" * 108)
     totals = {"old": {}, "new": {}}
     for path in docs:
@@ -120,10 +124,12 @@ def main() -> None:
         for side in ("old", "new"):
             for k, v in r[side].items():
                 totals[side].setdefault(k, []).append(v)
-        print(f"{path.name:<30} {r['old']['n_chunks']:>6} {r['new']['n_chunks']:>6} "
-              f"{r['old']['heading_chunks']:>9} {r['new']['chain_chunks']:>8} "
-              f"{r['old']['broken_tables']:>7} {r['new']['broken_tables']:>7} "
-              f"{r['old']['over_budget']:>7} {r['new']['over_budget']:>7}")
+        print(
+            f"{path.name:<30} {r['old']['n_chunks']:>6} {r['new']['n_chunks']:>6} "
+            f"{r['old']['heading_chunks']:>9} {r['new']['chain_chunks']:>8} "
+            f"{r['old']['broken_tables']:>7} {r['new']['broken_tables']:>7} "
+            f"{r['old']['over_budget']:>7} {r['new']['over_budget']:>7}"
+        )
     print("-" * 108)
 
     def total(side: str, key: str):

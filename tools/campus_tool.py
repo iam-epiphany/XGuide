@@ -7,6 +7,7 @@ query_campus_info —— 校园公开信息查询工具（结构化数据）。
 注意：校车查询内部会与当前时间比对计算"下一班"，因此本工具
 不设缓存（cache_ttl=0），保证时刻准确。
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict
